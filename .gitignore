@@ -1,0 +1,10 @@
+.env
+data/state.json
+logs/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.venv/
+HALT

@@ -1,0 +1,23 @@
+bot:
+  poll_interval_seconds: 30
+  dry_run: true
+  state_file: ./data/state.json
+  log_level: INFO
+  halt_file: ./HALT
+
+market_filter:
+  min_volume_24h_usdc: 1000
+  max_markets_per_cycle: 20
+
+risk:
+  max_total_exposure_pct: 0.20
+  max_position_usdc: 200
+  max_single_bet_usdc: 50
+  stop_loss_pct: 0.30
+
+strategies:
+  - name: example
+    module: polybot.strategies.example
+    enabled: true
+    config:
+      min_edge: 0.05
