@@ -148,7 +148,7 @@ class GammaClient:
             return None
 
     def _passes_filter(self, market: Market) -> bool:
-        if market.volume_24h is not None and market.volume_24h < self._min_volume:
+        if not market.volume_24h or market.volume_24h < self._min_volume:
             return False
         return True
 
