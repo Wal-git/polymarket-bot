@@ -30,7 +30,11 @@ class Market(BaseModel):
     active: bool
     outcomes: list[MarketOutcome]
     volume_24h: Optional[Decimal] = None
+    volume_total: Optional[Decimal] = None
     end_date_iso: Optional[str] = None
+    market_slug: Optional[str] = None
+    ticker: Optional[str] = None
+    neg_risk: bool = False
 
 
 class OrderRequest(BaseModel):

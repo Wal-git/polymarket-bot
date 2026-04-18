@@ -65,18 +65,39 @@ class GammaClient:
         resp.raise_for_status()
         return self._parse_market(resp.json())
 
+    def fetch_market_by_token_id(self, token_id: str) -> Optional[Market]:
+        """Look up a market by one of its CLOB token IDs.
+
+        Mirrors the "missing market discovery" pattern from warproxxx/poly_data:
+        when a strategy sees activity on an unknown token, fetch the market.
+        """
+        resp = self._http.get("/markets", params={"clob_token_ids": token_id})
+        resp.raise_for_status()
+        markets = resp.json()
+        if not markets:
+            return None
+        return self._parse_market(markets[0])
+
+    def _parse_json_field(self, value, default):
+        if value is None or value == "":
+            return default
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            import json
+
+            try:
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, list) else default
+            except json.JSONDecodeError:
+                return [v.strip() for v in value.split(",") if v.strip()]
+        return default
+
     def _parse_market(self, raw: dict) -> Optional[Market]:
         try:
-            tokens = raw.get("clobTokenIds", "")
-            outcomes_raw = raw.get("outcomes", "")
-            if isinstance(tokens, str):
-                tokens = [t.strip() for t in tokens.split(",") if t.strip()]
-            if isinstance(outcomes_raw, str):
-                outcomes_raw = [o.strip() for o in outcomes_raw.split(",") if o.strip()]
-
-            prices = raw.get("outcomePrices", "")
-            if isinstance(prices, str):
-                prices = [p.strip() for p in prices.split(",") if p.strip()]
+            tokens = self._parse_json_field(raw.get("clobTokenIds"), [])
+            outcomes_raw = self._parse_json_field(raw.get("outcomes"), [])
+            prices = self._parse_json_field(raw.get("outcomePrices"), [])
 
             if not tokens or len(tokens) != len(outcomes_raw):
                 return None
@@ -86,22 +107,38 @@ class GammaClient:
                 price = _safe_decimal(prices[i]) if i < len(prices) else Decimal("0")
                 outcomes.append(
                     MarketOutcome(
-                        token_id=token_id,
+                        token_id=str(token_id),
                         label=outcomes_raw[i] if i < len(outcomes_raw) else f"Outcome {i}",
                         price=price,
                     )
                 )
 
-            volume_raw = raw.get("volume24hr")
-            volume_24h = _safe_decimal(volume_raw) if volume_raw not in (None, "") else None
+            volume_24h_raw = raw.get("volume24hr")
+            volume_24h = _safe_decimal(volume_24h_raw) if volume_24h_raw not in (None, "") else None
+
+            volume_total_raw = raw.get("volume")
+            volume_total = (
+                _safe_decimal(volume_total_raw) if volume_total_raw not in (None, "") else None
+            )
+
+            neg_risk = bool(raw.get("negRiskAugmented") or raw.get("negRiskOther"))
+
+            ticker = ""
+            events = raw.get("events") or []
+            if events:
+                ticker = events[0].get("ticker", "") or ""
 
             return Market(
                 condition_id=raw.get("conditionId", raw.get("condition_id", "")),
-                question=raw.get("question", ""),
+                question=raw.get("question", "") or raw.get("title", ""),
                 active=raw.get("active", True),
                 outcomes=outcomes,
                 volume_24h=volume_24h,
+                volume_total=volume_total,
                 end_date_iso=raw.get("endDate"),
+                market_slug=raw.get("slug"),
+                ticker=ticker or None,
+                neg_risk=neg_risk,
             )
         except (KeyError, ValueError, TypeError) as e:
             logger.warning("parse_market_failed", error=str(e))

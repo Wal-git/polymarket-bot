@@ -21,3 +21,18 @@ strategies:
     enabled: true
     config:
       min_edge: 0.05
+
+  - name: smart_money
+    module: strategies.smart_money
+    enabled: false
+    config:
+      wallets:
+        - "0x9d84ce0306f8551e02efef1680475fc0f1dc1344"  # domah
+        - "0x3cf3e8d5427aed066a7a5926980600f6c3cf87b3"  # 50pence
+        - "0x6356fb47642a028bc09df92023c35a21a0b41885"  # fhantom
+        - "0x7c3db723f1d4d8cb9c550095203b686cb11e5c6b"  # car
+        - "0x56687bf447db6ffa42ffe2204a05edaa20f55839"  # theo4
+      lookback_minutes: 60
+      min_wallet_buys: 2
+      max_entry_price: 0.85
+      size_usdc: 10
