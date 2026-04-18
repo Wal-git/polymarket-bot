@@ -83,6 +83,9 @@ class Engine:
         all_signals: list[SignalSet] = []
 
         for strategy in self._strategies:
+            reset = getattr(strategy, "reset_cycle_cache", None)
+            if callable(reset):
+                reset()
             config = getattr(strategy, "_config", {})
             for market in markets:
                 if not strategy.filter_market(market):
