@@ -1,6 +1,6 @@
 bot:
   poll_interval_seconds: 30
-  dry_run: true
+  dry_run: false
   state_file: ./data/state.json
   log_level: INFO
   halt_file: ./HALT
@@ -18,13 +18,13 @@ risk:
 strategies:
   - name: example
     module: polybot.strategies.example
-    enabled: true
+    enabled: false
     config:
       min_edge: 0.05
 
   - name: smart_money
     module: strategies.smart_money
-    enabled: false
+    enabled: true
     config:
       wallets:
         - "0x9d84ce0306f8551e02efef1680475fc0f1dc1344"  # domah

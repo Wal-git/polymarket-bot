@@ -15,6 +15,7 @@ class CLOBClient:
 
     def connect(self):
         from py_clob_client.client import ClobClient
+        from py_clob_client.clob_types import ApiCreds
         from py_clob_client.constants import POLYGON
 
         creds = get_clob_creds()
@@ -22,11 +23,11 @@ class CLOBClient:
             "https://clob.polymarket.com",
             key=get_private_key(),
             chain_id=POLYGON,
-            creds={
-                "apiKey": creds["api_key"],
-                "secret": creds["api_secret"],
-                "passphrase": creds["passphrase"],
-            },
+            creds=ApiCreds(
+                api_key=creds["api_key"],
+                api_secret=creds["api_secret"],
+                api_passphrase=creds["passphrase"],
+            ),
         )
         logger.info("clob_connected")
 
@@ -95,8 +96,10 @@ class CLOBClient:
 
     def get_balance(self) -> Decimal:
         try:
-            bal = self.client.get_balance_allowance()
-            return Decimal(str(bal.get("balance", 0)))
+            from py_clob_client.clob_types import AssetType, BalanceAllowanceParams
+            params = BalanceAllowanceParams(asset_type=AssetType.COLLATERAL)
+            bal = self.client.get_balance_allowance(params=params)
+            return Decimal(str(bal.get("balance", 0))) / Decimal("1e6")
         except Exception:
             logger.warning("balance_fetch_failed")
             return Decimal("0")
