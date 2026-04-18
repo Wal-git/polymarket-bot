@@ -42,8 +42,7 @@ class SmartMoneyStrategy(BaseStrategy):
     NAME = "smart_money"
 
     _goldsky: GoldskyClient | None = None
-    _cached_events: list[OrderFilledEvent] | None = None
-    _cache_cycle_id: int | None = None
+    _cycle_events: list[OrderFilledEvent] | None = None
 
     def _client(self) -> GoldskyClient:
         if self._goldsky is None:
@@ -52,16 +51,16 @@ class SmartMoneyStrategy(BaseStrategy):
 
     def _fetch_once_per_cycle(self, lookback_minutes: int) -> list[OrderFilledEvent]:
         # StrategyContext is rebuilt per (strategy, market), but we only want
-        # to hit Goldsky once per overall cycle. Key by the id of the current
-        # positions list, which is stable within a cycle.
-        if self._cached_events is None:
-            self._cached_events = self._client().recent_events(
+        # to hit Goldsky once per overall cycle.
+        if self._cycle_events is None:
+            self._cycle_events = self._client().recent_events(
                 lookback_minutes=lookback_minutes
             )
-        return self._cached_events
+        return self._cycle_events
 
     def reset_cycle_cache(self) -> None:
-        self._cached_events = None
+        # Clear per-cycle snapshot; GoldskyClient keeps its rolling cache.
+        self._cycle_events = None
 
     def evaluate(self, ctx: StrategyContext) -> SignalSet:
         cfg = ctx.config

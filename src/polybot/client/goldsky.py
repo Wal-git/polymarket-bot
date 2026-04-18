@@ -71,6 +71,27 @@ class GoldskyClient:
         self._batch_size = batch_size
         self._max_retries = max_retries
         self._session = requests.Session()
+        # Rolling cache: stores events within the last lookback window
+        self._event_cache: list[OrderFilledEvent] = []
+        self._last_fetch_ts: int | None = None
+
+    def recent_events(self, lookback_minutes: int = 30) -> list[OrderFilledEvent]:
+        now = int(time.time())
+        window_start = now - lookback_minutes * 60
+
+        if self._last_fetch_ts is None:
+            # Cold start: fetch full window
+            new_events = self.fetch_events_since(since_ts=window_start, until_ts=now)
+            self._event_cache = new_events
+        else:
+            # Incremental: only fetch events since last fetch
+            new_events = self.fetch_events_since(since_ts=self._last_fetch_ts, until_ts=now)
+            self._event_cache.extend(new_events)
+            # Drop events outside the rolling window
+            self._event_cache = [e for e in self._event_cache if e.timestamp >= window_start]
+
+        self._last_fetch_ts = now
+        return list(self._event_cache)
 
     def fetch_events_since(
         self,
@@ -133,10 +154,6 @@ class GoldskyClient:
             since=datetime.fromtimestamp(since_ts, tz=timezone.utc).isoformat(),
         )
         return events
-
-    def recent_events(self, lookback_minutes: int = 30) -> list[OrderFilledEvent]:
-        now = int(time.time())
-        return self.fetch_events_since(since_ts=now - lookback_minutes * 60, until_ts=now)
 
     def _query_batch(
         self,
