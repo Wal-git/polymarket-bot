@@ -7,7 +7,6 @@ bot:
 
 market_filter:
   min_volume_24h_usdc: 1000
-  max_markets_per_cycle: 20
 
 risk:
   max_total_exposure_pct: 0.20

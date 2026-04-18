@@ -21,7 +21,7 @@ def _safe_decimal(value, default: Decimal = Decimal("0")) -> Decimal:
 
 
 class GammaClient:
-    def __init__(self, min_volume: Decimal = Decimal("1000"), max_markets: int = 20):
+    def __init__(self, min_volume: Decimal = Decimal("1000"), max_markets: int = None):
         self._min_volume = min_volume
         self._max_markets = max_markets
         self._http = httpx.Client(base_url=GAMMA_API_BASE, timeout=30)
@@ -31,7 +31,7 @@ class GammaClient:
         offset = 0
         limit = 100
 
-        while len(markets) < self._max_markets:
+        while True:
             resp = self._http.get(
                 "/markets",
                 params={
@@ -50,8 +50,11 @@ class GammaClient:
                 market = self._parse_market(raw)
                 if market and self._passes_filter(market):
                     markets.append(market)
-                    if len(markets) >= self._max_markets:
+                    if self._max_markets and len(markets) >= self._max_markets:
                         break
+
+            if self._max_markets and len(markets) >= self._max_markets:
+                break
 
             offset += limit
 

@@ -31,7 +31,7 @@ def build_bot(config_path: str = "config/default.yaml") -> Engine:
 
     gamma = GammaClient(
         min_volume=market_cfg.get("min_volume_24h_usdc", 1000),
-        max_markets=market_cfg.get("max_markets_per_cycle", 20),
+        max_markets=market_cfg.get("max_markets_per_cycle"),
     )
     clob = CLOBClient()
     state_file = bot_cfg.get("state_file", "./data/state.json")
