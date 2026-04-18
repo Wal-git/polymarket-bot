@@ -109,6 +109,8 @@ class Engine:
                             if not self._dry_run
                             else market.outcomes
                         )
+                        if not enriched_outcomes:
+                            continue
                         enriched_market = market.model_copy(update={"outcomes": enriched_outcomes})
 
                         ctx = StrategyContext(

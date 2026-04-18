@@ -53,7 +53,10 @@ class CLOBClient:
     def enrich_outcomes(self, outcomes: list[MarketOutcome]) -> list[MarketOutcome]:
         enriched = []
         for outcome in outcomes:
-            bid, ask = self.get_best_bid_ask(outcome.token_id)
+            try:
+                bid, ask = self.get_best_bid_ask(outcome.token_id)
+            except Exception:
+                return []
             enriched.append(
                 outcome.model_copy(update={"best_bid": bid, "best_ask": ask})
             )
