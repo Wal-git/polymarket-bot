@@ -11,6 +11,7 @@ from polybot.client.clob import CLOBClient
 from polybot.client.gamma import GammaClient
 from polybot.execution.order_manager import OrderManager
 from polybot.models.types import SignalSet
+from polybot.monitoring.event_log import EventLog
 from polybot.monitoring.tracker import PositionTracker
 from polybot.safety.risk_manager import RiskManager
 from polybot.strategies.base import BaseStrategy, StrategyContext
@@ -31,6 +32,7 @@ class Engine:
         poll_interval: int = 30,
         dry_run: bool = True,
         halt_file: str = "./HALT",
+        event_log: EventLog | None = None,
     ):
         self._strategies = strategies
         self._gamma = gamma
@@ -41,6 +43,7 @@ class Engine:
         self._poll_interval = poll_interval
         self._dry_run = dry_run
         self._halt_file = Path(halt_file)
+        self._events = event_log or EventLog()
         self._running = False
 
     def start(self):
@@ -72,57 +75,110 @@ class Engine:
         self._run_cycle()
 
     def _run_cycle(self):
-        markets = self._gamma.fetch_active_markets()
-        if not markets:
-            logger.info("no_markets")
-            return
+        cycle_start = time.monotonic()
+        markets_scanned = 0
+        signals_generated = 0
+        signals_approved = 0
+        balance = Decimal("0")
 
-        balance = self._clob.get_balance() if not self._dry_run else Decimal("10000")
-        positions = self._tracker.positions
+        try:
+            markets = self._gamma.fetch_active_markets()
+            markets_scanned = len(markets)
+            if not markets:
+                logger.info("no_markets")
+                return
 
-        all_signals: list[SignalSet] = []
+            balance = self._clob.get_balance() if not self._dry_run else Decimal("10000")
+            positions = self._tracker.positions
 
-        for strategy in self._strategies:
-            reset = getattr(strategy, "reset_cycle_cache", None)
-            if callable(reset):
-                reset()
-            config = getattr(strategy, "_config", {})
-            for market in markets:
-                if not strategy.filter_market(market):
-                    continue
+            all_signals: list[SignalSet] = []
+            signal_meta: list[dict] = []
 
-                try:
-                    enriched_outcomes = self._clob.enrich_outcomes(market.outcomes) if not self._dry_run else market.outcomes
-                    enriched_market = market.model_copy(update={"outcomes": enriched_outcomes})
+            for strategy in self._strategies:
+                reset = getattr(strategy, "reset_cycle_cache", None)
+                if callable(reset):
+                    reset()
+                config = getattr(strategy, "_config", {})
+                for market in markets:
+                    if not strategy.filter_market(market):
+                        continue
 
-                    ctx = StrategyContext(
-                        market=enriched_market,
-                        open_positions=positions,
-                        portfolio_balance=balance,
-                        historical_prices=[],
-                        config=config,
-                    )
-                    signal_set = strategy.evaluate(ctx)
-                    if signal_set.orders:
-                        all_signals.append(signal_set)
-                except Exception as e:
-                    logger.warning(
-                        "strategy_eval_failed",
-                        strategy=strategy.NAME,
-                        market=market.condition_id,
-                        error=str(e),
-                    )
+                    try:
+                        enriched_outcomes = (
+                            self._clob.enrich_outcomes(market.outcomes)
+                            if not self._dry_run
+                            else market.outcomes
+                        )
+                        enriched_market = market.model_copy(update={"outcomes": enriched_outcomes})
 
-        approved = self._risk.validate_signals(all_signals, positions, balance)
+                        ctx = StrategyContext(
+                            market=enriched_market,
+                            open_positions=positions,
+                            portfolio_balance=balance,
+                            historical_prices=[],
+                            config=config,
+                        )
+                        signal_set = strategy.evaluate(ctx)
+                        if signal_set.orders:
+                            all_signals.append(signal_set)
+                            signal_meta.append(
+                                {"strategy": strategy.NAME, "market_question": market.question}
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            "strategy_eval_failed",
+                            strategy=strategy.NAME,
+                            market=market.condition_id,
+                            error=str(e),
+                        )
 
-        if approved:
-            self._order_manager.execute_signals(approved)
+            approved, rejections = self._risk.validate_signals(all_signals, positions, balance)
+            approved_ids = {s.market_condition_id for s in approved}
 
-        stop_loss_tokens = self._risk.check_stop_losses(positions)
-        for token_id in stop_loss_tokens:
-            self._order_manager.close_position(token_id)
+            for sig, meta in zip(all_signals, signal_meta):
+                is_approved = sig.market_condition_id in approved_ids
+                self._events.emit_signal(
+                    strategy=meta["strategy"],
+                    market_condition_id=sig.market_condition_id,
+                    market_question=meta["market_question"],
+                    rationale=sig.rationale,
+                    confidence=sig.confidence,
+                    approved=is_approved,
+                    reject_reason=rejections.get(sig.market_condition_id),
+                    orders=[
+                        {
+                            "token_id": o.token_id,
+                            "side": o.side.value,
+                            "order_type": o.order_type.value,
+                            "size": str(o.size),
+                            "limit_price": str(o.limit_price) if o.limit_price else None,
+                        }
+                        for o in sig.orders
+                    ],
+                )
 
-        self._print_cycle_summary(markets, all_signals, approved)
+            signals_generated = len(all_signals)
+            signals_approved = len(approved)
+
+            if approved:
+                self._order_manager.execute_signals(approved)
+
+            stop_loss_tokens = self._risk.check_stop_losses(positions)
+            for token_id in stop_loss_tokens:
+                self._order_manager.close_position(token_id)
+
+            self._print_cycle_summary(markets, all_signals, approved)
+        finally:
+            self._events.emit_cycle(
+                markets_scanned=markets_scanned,
+                signals_generated=signals_generated,
+                signals_approved=signals_approved,
+                open_positions=len(self._tracker.positions),
+                balance=str(balance) if balance > 0 else None,
+                total_pnl=str(self._tracker.total_pnl()),
+                duration_ms=int((time.monotonic() - cycle_start) * 1000),
+                dry_run=self._dry_run,
+            )
 
     def _print_cycle_summary(
         self,

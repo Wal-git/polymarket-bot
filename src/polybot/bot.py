@@ -6,6 +6,7 @@ from polybot.auth.wallet import load_env
 from polybot.client.clob import CLOBClient
 from polybot.client.gamma import GammaClient
 from polybot.execution.order_manager import OrderManager
+from polybot.monitoring.event_log import EventLog
 from polybot.monitoring.logger import setup_logging
 from polybot.monitoring.tracker import PositionTracker
 from polybot.safety.risk_manager import RiskManager
@@ -33,10 +34,12 @@ def build_bot(config_path: str = "config/default.yaml") -> Engine:
         max_markets=market_cfg.get("max_markets_per_cycle", 20),
     )
     clob = CLOBClient()
-    tracker = PositionTracker(state_file=bot_cfg.get("state_file", "./data/state.json"))
+    state_file = bot_cfg.get("state_file", "./data/state.json")
+    tracker = PositionTracker(state_file=state_file)
     risk_manager = RiskManager(**risk_cfg)
     order_manager = OrderManager(clob=clob, tracker=tracker, dry_run=dry_run)
     strategies = load_strategies(config.get("strategies", []))
+    event_log = EventLog(data_dir=Path(state_file).parent)
 
     return Engine(
         strategies=strategies,
@@ -48,4 +51,5 @@ def build_bot(config_path: str = "config/default.yaml") -> Engine:
         poll_interval=bot_cfg.get("poll_interval_seconds", 30),
         dry_run=dry_run,
         halt_file=bot_cfg.get("halt_file", "./HALT"),
+        event_log=event_log,
     )

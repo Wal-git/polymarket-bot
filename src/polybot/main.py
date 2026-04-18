@@ -68,6 +68,38 @@ def positions(config: str = typer.Option("config/default.yaml", help="Path to co
     console.print(f"\nTotal P&L: ${tracker.total_pnl():.2f}")
 
 
+@app.command()
+def dashboard(
+    port: int = typer.Option(8501, help="Port to serve the Streamlit dashboard"),
+    address: str = typer.Option("localhost", help="Bind address (use 0.0.0.0 to expose)"),
+):
+    """Launch the Streamlit dashboard for monitoring signals and positions."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    app_path = Path(__file__).parent / "dashboard" / "app.py"
+    if not app_path.exists():
+        console.print(f"[red]Dashboard app not found at {app_path}[/]")
+        raise typer.Exit(1)
+
+    try:
+        subprocess.run(
+            [
+                sys.executable, "-m", "streamlit", "run", str(app_path),
+                "--server.port", str(port),
+                "--server.address", address,
+                "--browser.gatherUsageStats", "false",
+            ],
+            check=True,
+        )
+    except FileNotFoundError:
+        console.print("[red]Streamlit not installed. Run: pip install -e '.[dashboard]'[/]")
+        raise typer.Exit(1)
+    except subprocess.CalledProcessError as e:
+        raise typer.Exit(e.returncode)
+
+
 @app.command(name="cancel-all")
 def cancel_all():
     """Emergency: cancel all open orders."""

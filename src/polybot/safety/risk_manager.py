@@ -25,14 +25,22 @@ class RiskManager:
         signals: list[SignalSet],
         positions: list[Position],
         balance: Decimal,
-    ) -> list[SignalSet]:
+    ) -> tuple[list[SignalSet], dict[str, str]]:
+        """Validate signals against risk caps.
+
+        Returns ``(approved, rejection_reasons)`` where ``rejection_reasons`` maps
+        ``market_condition_id`` -> human-readable reason for any signal that ended
+        up with no valid orders. Approved signals may have orders downsized.
+        """
         current_exposure = sum(p.shares * p.avg_entry_price for p in positions)
         max_exposure = balance * self._max_exposure_pct
         remaining = max_exposure - current_exposure
 
         approved: list[SignalSet] = []
+        rejections: dict[str, str] = {}
         for signal in signals:
             valid_orders: list[OrderRequest] = []
+            reasons: list[str] = []
             for order in signal.orders:
                 if order.size > self._max_bet:
                     logger.warning("order_capped", original=str(order.size), cap=str(self._max_bet))
@@ -47,12 +55,14 @@ class RiskManager:
                     allowed = self._max_position - token_exposure
                     if allowed <= 0:
                         logger.warning("position_limit_hit", token_id=order.token_id)
+                        reasons.append("position cap")
                         continue
                     order = order.model_copy(update={"size": allowed})
 
                 if order.size > remaining:
                     if remaining <= 0:
                         logger.warning("exposure_limit_hit")
+                        reasons.append("exposure cap")
                         continue
                     order = order.model_copy(update={"size": remaining})
 
@@ -60,11 +70,11 @@ class RiskManager:
                 valid_orders.append(order)
 
             if valid_orders:
-                approved.append(
-                    signal.model_copy(update={"orders": valid_orders})
-                )
+                approved.append(signal.model_copy(update={"orders": valid_orders}))
+            else:
+                rejections[signal.market_condition_id] = "; ".join(reasons) or "no valid orders"
 
-        return approved
+        return approved, rejections
 
     def check_stop_losses(self, positions: list[Position]) -> list[str]:
         tokens_to_close: list[str] = []
