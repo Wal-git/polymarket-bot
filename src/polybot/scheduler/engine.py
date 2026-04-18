@@ -99,22 +99,50 @@ class Engine:
                 if callable(reset):
                     reset()
                 config = getattr(strategy, "_config", {})
+
+                # Pass 1: evaluate all markets using Gamma prices — no CLOB calls.
+                # This is fast and filters down to only markets worth enriching.
+                candidate_markets = []
                 for market in markets:
                     if not strategy.filter_market(market):
                         continue
-
                     try:
-                        enriched_outcomes = (
-                            self._clob.enrich_outcomes(market.outcomes)
-                            if not self._dry_run
-                            else market.outcomes
+                        ctx = StrategyContext(
+                            market=market,
+                            open_positions=positions,
+                            portfolio_balance=balance,
+                            historical_prices=[],
+                            config=config,
                         )
-                        if not enriched_outcomes:
-                            continue
-                        enriched_market = market.model_copy(update={"outcomes": enriched_outcomes})
+                        preliminary = strategy.evaluate(ctx)
+                        if preliminary.orders:
+                            candidate_markets.append(market)
+                    except Exception as e:
+                        logger.warning(
+                            "strategy_eval_failed",
+                            strategy=strategy.NAME,
+                            market=market.condition_id,
+                            error=str(e),
+                        )
+
+                logger.info(
+                    "candidates_found",
+                    strategy=strategy.NAME,
+                    count=len(candidate_markets),
+                )
+
+                # Pass 2: enrich only candidate markets with live CLOB bid/ask,
+                # then re-evaluate to get accurate entry prices.
+                for market in candidate_markets:
+                    try:
+                        if not self._dry_run:
+                            enriched_outcomes = self._clob.enrich_outcomes(market.outcomes)
+                            if not enriched_outcomes:
+                                continue
+                            market = market.model_copy(update={"outcomes": enriched_outcomes})
 
                         ctx = StrategyContext(
-                            market=enriched_market,
+                            market=market,
                             open_positions=positions,
                             portfolio_balance=balance,
                             historical_prices=[],
