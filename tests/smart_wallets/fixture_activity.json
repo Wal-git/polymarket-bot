@@ -1,0 +1,22 @@
+{
+  "raw_trades": [
+    {"timestamp": 1710000000, "usdcSize": 1000.0, "side": "BUY",  "conditionId": "mkt-1"},
+    {"timestamp": 1710100000, "usdcSize": 2000.0, "side": "BUY",  "conditionId": "mkt-1"},
+    {"timestamp": 1710200000, "usdcSize": 3000.0, "side": "SELL", "conditionId": "mkt-2"},
+    {"timestamp": 1710300000, "usdcSize": 500.0,  "side": "BUY",  "conditionId": "mkt-3"},
+    {"timestamp": 1710400000, "usdcSize": 800.0,  "side": "SELL", "conditionId": "mkt-3"}
+  ],
+  "raw_redeems": [
+    {"timestamp": 1710500000, "usdcSize": 4500.0, "conditionId": "mkt-1"},
+    {"timestamp": 1710600000, "usdcSize": 1200.0, "conditionId": "mkt-2"}
+  ],
+  "raw_positions": [
+    {"conditionId": "mkt-1", "redeemable": true,  "initialValue": 3000.0, "cashPnl": 1500.0},
+    {"conditionId": "mkt-2", "redeemable": false, "initialValue": 2000.0, "cashPnl": -200.0}
+  ],
+  "raw_value": {"value": 12000.0},
+  "proxy_wallet": "0xabc123",
+  "username": "test_trader",
+  "enrich_start_ts": 1709000000,
+  "enrich_end_ts":   1710700000
+}

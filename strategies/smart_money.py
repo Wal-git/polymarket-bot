@@ -27,7 +27,9 @@ Config (config/default.yaml):
 """
 from __future__ import annotations
 
+import json
 from decimal import Decimal
+from pathlib import Path
 
 import structlog
 
@@ -36,6 +38,19 @@ from polybot.models.types import OrderRequest, OrderType, Side, SignalSet
 from polybot.strategies.base import BaseStrategy, StrategyContext
 
 logger = structlog.get_logger()
+
+_SMART_WALLETS_JSON = Path(__file__).resolve().parents[1] / "data" / "smart_wallets.json"
+
+
+def _load_smart_wallets() -> list[str]:
+    """Return proxy wallet addresses from smart_wallets.json, or [] if absent."""
+    try:
+        data = json.loads(_SMART_WALLETS_JSON.read_text())
+        wallets = [w["proxy_wallet"] for w in data.get("wallets", [])]
+        logger.info("smart_wallets_loaded", count=len(wallets), path=str(_SMART_WALLETS_JSON))
+        return wallets
+    except (OSError, KeyError, json.JSONDecodeError):
+        return []
 
 
 class SmartMoneyStrategy(BaseStrategy):
@@ -64,7 +79,10 @@ class SmartMoneyStrategy(BaseStrategy):
 
     def evaluate(self, ctx: StrategyContext) -> SignalSet:
         cfg = ctx.config
-        wallets = {w.lower() for w in cfg.get("wallets", [])}
+        # Dynamic list from weekly pipeline takes precedence; YAML list is fallback.
+        dynamic = _load_smart_wallets()
+        raw_wallets = dynamic if dynamic else cfg.get("wallets", [])
+        wallets = {w.lower() for w in raw_wallets}
         if not wallets:
             return SignalSet(
                 market_condition_id=ctx.market.condition_id,
