@@ -1,18 +1,19 @@
 {
   "raw_trades": [
-    {"timestamp": 1710000000, "usdcSize": 1000.0, "side": "BUY",  "conditionId": "mkt-1"},
-    {"timestamp": 1710100000, "usdcSize": 2000.0, "side": "BUY",  "conditionId": "mkt-1"},
-    {"timestamp": 1710200000, "usdcSize": 3000.0, "side": "SELL", "conditionId": "mkt-2"},
-    {"timestamp": 1710300000, "usdcSize": 500.0,  "side": "BUY",  "conditionId": "mkt-3"},
-    {"timestamp": 1710400000, "usdcSize": 800.0,  "side": "SELL", "conditionId": "mkt-3"}
+    {"timestamp": 1710000000, "usdcSize": 1000.0, "size": 2000.0, "price": 0.50, "side": "BUY",  "conditionId": "mkt-1", "asset": "tok-1-YES"},
+    {"timestamp": 1710100000, "usdcSize": 2000.0, "size": 2500.0, "price": 0.80, "side": "BUY",  "conditionId": "mkt-1", "asset": "tok-1-YES"},
+    {"timestamp": 1710200000, "usdcSize": 3000.0, "size": 4000.0, "price": 0.75, "side": "SELL", "conditionId": "mkt-2", "asset": "tok-2-YES"},
+    {"timestamp": 1710300000, "usdcSize": 500.0,  "size": 1000.0, "price": 0.50, "side": "BUY",  "conditionId": "mkt-3", "asset": "tok-3-YES"},
+    {"timestamp": 1710400000, "usdcSize": 800.0,  "size": 1200.0, "price": 0.67, "side": "SELL", "conditionId": "mkt-3", "asset": "tok-3-YES"}
   ],
   "raw_redeems": [
-    {"timestamp": 1710500000, "usdcSize": 4500.0, "conditionId": "mkt-1"},
-    {"timestamp": 1710600000, "usdcSize": 1200.0, "conditionId": "mkt-2"}
+    {"timestamp": 1710500000, "usdcSize": 4500.0, "conditionId": "mkt-1", "asset": "tok-1-YES"},
+    {"timestamp": 1710600000, "usdcSize": 1200.0, "conditionId": "mkt-2", "asset": "tok-2-YES"}
   ],
   "raw_positions": [
-    {"conditionId": "mkt-1", "redeemable": true,  "initialValue": 3000.0, "cashPnl": 1500.0},
-    {"conditionId": "mkt-2", "redeemable": false, "initialValue": 2000.0, "cashPnl": -200.0}
+    {"conditionId": "mkt-1", "asset": "tok-1-YES", "redeemable": true,  "initialValue": 3000.0, "cashPnl": 1500.0},
+    {"conditionId": "mkt-2", "asset": "tok-2-YES", "redeemable": false, "initialValue": 2000.0, "cashPnl": -200.0},
+    {"conditionId": "mkt-4", "asset": "tok-4-NO",  "redeemable": false, "initialValue": 1000.0, "cashPnl": 300.0}
   ],
   "raw_value": {"value": 12000.0},
   "proxy_wallet": "0xabc123",

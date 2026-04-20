@@ -1,5 +1,8 @@
 .env
 data/state.json
+data/smart_wallets.db
+data/smart_wallets*.json
+data/.cache/
 logs/
 __pycache__/
 *.pyc
