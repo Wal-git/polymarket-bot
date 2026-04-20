@@ -142,5 +142,60 @@ if latest_run is not None:
             except Exception as exc:  # noqa: BLE001
                 col2.error(f"Backtest failed: {exc}")
 
+
+# ---------------------------------------------------------------------------
+# trail backtest
+# ---------------------------------------------------------------------------
+
+st.markdown("### Trail-strategy backtest")
+st.caption(
+    "Replays wallet-filtered Goldsky events over a past window, simulates "
+    "the SmartMoneyStrategy at configurable cadence, and reports simulated PnL."
+)
+if latest_run is not None:
+    tb1, tb2 = st.columns([1, 3])
+    trail_run = tb1.selectbox(
+        "Cohort run",
+        options=[r["run_id"] for r in runs],
+        index=0,
+        key="trail_run",
+    )
+    trail_days = tb1.number_input("Window days", min_value=1, max_value=30, value=7, key="trail_days")
+    trail_interval = tb1.number_input("Sim interval (s)", min_value=10, max_value=3600, value=30, key="trail_interval")
+    if tb1.button("Run trail backtest", type="primary"):
+        from polybot.smart_wallets.trail_backtest import run_trail_backtest
+
+        with st.spinner(f"Replaying {trail_days}d of events for run #{trail_run}…"):
+            try:
+                tr = run_trail_backtest(
+                    run_id=int(trail_run),
+                    lookback_window_days=int(trail_days),
+                    sim_interval_seconds=int(trail_interval),
+                )
+                m1, m2, m3, m4 = tb2.columns(4)
+                m1.metric("Signals", tr.n_signals)
+                m2.metric("Positions", tr.n_positions)
+                m3.metric("Total PnL", f"${tr.total_pnl:+.2f}")
+                m4.metric("Win rate", f"{tr.win_rate:.0%}")
+                d1, d2 = tb2.columns(2)
+                d1.metric("Whale-exit closes", tr.n_whale_exit_closes)
+                d2.metric("TTL closes", tr.n_ttl_closes)
+                if tr.positions:
+                    import pandas as pd
+                    rows = [
+                        {
+                            "token_id": p.token_id[:12] + "…",
+                            "entry_price": round(p.entry_price, 4),
+                            "exit_price": round(p.exit_price, 4) if p.exit_price is not None else None,
+                            "size_usdc": round(p.size_usdc, 2),
+                            "pnl": round(p.pnl, 4),
+                            "exit_reason": p.exit_reason,
+                        }
+                        for p in tr.positions
+                    ]
+                    tb2.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            except Exception as exc:  # noqa: BLE001
+                tb2.error(f"Trail backtest failed: {exc}")
+
 if store is not None:
     store.close()
