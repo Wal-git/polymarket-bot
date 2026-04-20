@@ -89,6 +89,30 @@ def _cmd_backtest(args: list[str]) -> None:
     print(json.dumps(result.to_dict(), indent=2))
 
 
+def _cmd_trail_backtest(args: list[str]) -> None:
+    from polybot.smart_wallets.trail_backtest import run_trail_backtest
+
+    run_id = None
+    window_days = 7
+    interval = 30
+    for a in args:
+        if a.startswith("--run="):
+            run_id = int(a.split("=", 1)[1])
+        elif a.startswith("--days="):
+            window_days = int(a.split("=", 1)[1])
+        elif a.startswith("--interval="):
+            interval = int(a.split("=", 1)[1])
+    if run_id is None:
+        print("Usage: trail-backtest --run=<run_id> [--days=7] [--interval=30]")
+        sys.exit(1)
+
+    result = run_trail_backtest(
+        run_id=run_id, lookback_window_days=window_days, sim_interval_seconds=interval
+    )
+    print(result.summary())
+    print(json.dumps(result.to_dict(), indent=2))
+
+
 def main(argv: list[str] | None = None) -> None:
     argv = argv or sys.argv[1:]
     cmd = argv[0] if argv else "run"
@@ -100,8 +124,10 @@ def main(argv: list[str] | None = None) -> None:
         _cmd_status(rest)
     elif cmd == "backtest":
         _cmd_backtest(rest)
+    elif cmd == "trail-backtest":
+        _cmd_trail_backtest(rest)
     else:
-        print(f"Unknown command: {cmd}. Use 'run', 'status', or 'backtest'.")
+        print(f"Unknown command: {cmd}. Use 'run', 'status', 'backtest', or 'trail-backtest'.")
         sys.exit(1)
 
 
