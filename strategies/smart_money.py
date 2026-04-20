@@ -1,33 +1,18 @@
 """Follow-the-whales strategy.
 
 Watches a configurable list of elite Polymarket wallets (via the Goldsky
-subgraph). When at least `min_wallet_buys` distinct tracked wallets have
-BOUGHT into the same outcome inside the lookback window, we enter a small
-position on that outcome at a capped limit price.
+subgraph). When the weighted sum of tracked-wallet confluence on an outcome
+crosses a threshold inside the lookback window, enters a capped limit order
+on that outcome.
 
-Inspired by the trader-watchlist from warproxxx/poly_data:
-    domah, 50pence, fhantom, car, theo4 — consistently profitable makers.
-
-Config (config/default.yaml):
-    strategies:
-      - name: smart_money
-        module: strategies.smart_money
-        enabled: true
-        config:
-          wallets:
-            - "0x9d84ce0306f8551e02efef1680475fc0f1dc1344"  # domah
-            - "0x3cf3e8d5427aed066a7a5926980600f6c3cf87b3"  # 50pence
-            - "0x6356fb47642a028bc09df92023c35a21a0b41885"  # fhantom
-            - "0x7c3db723f1d4d8cb9c550095203b686cb11e5c6b"  # car
-            - "0x56687bf447db6ffa42ffe2204a05edaa20f55839"  # theo4
-          lookback_minutes: 60
-          min_wallet_buys: 2
-          max_entry_price: 0.85
-          size_usdc: 10
+Wallets and their per-wallet scores are loaded from the signal-archetype
+JSON produced by the smart-wallet pipeline. A stale wallet (last_active_ts
+too old) is excluded at load time.
 """
 from __future__ import annotations
 
 import json
+import time
 from decimal import Decimal
 from pathlib import Path
 
@@ -39,18 +24,48 @@ from polybot.strategies.base import BaseStrategy, StrategyContext
 
 logger = structlog.get_logger()
 
-_SMART_WALLETS_JSON = Path(__file__).resolve().parents[1] / "data" / "smart_wallets.json"
+_DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+_SMART_WALLETS_SIGNAL_JSON = _DATA_DIR / "smart_wallets_signal.json"
+_SMART_WALLETS_JSON = _DATA_DIR / "smart_wallets.json"
+
+_DEFAULT_STALE_DAYS = 3
+_DEFAULT_MIN_SCORE = 0.0
 
 
-def _load_smart_wallets() -> list[str]:
-    """Return proxy wallet addresses from smart_wallets.json, or [] if absent."""
+def _load_smart_wallets(
+    min_score: float = _DEFAULT_MIN_SCORE,
+    stale_days: int = _DEFAULT_STALE_DAYS,
+) -> dict[str, float]:
+    """Return {proxy_wallet: score} from signal JSON (falls back to closer JSON).
+
+    Drops wallets with stale last_active_ts or score below threshold.
+    """
+    path = _SMART_WALLETS_SIGNAL_JSON if _SMART_WALLETS_SIGNAL_JSON.exists() else _SMART_WALLETS_JSON
     try:
-        data = json.loads(_SMART_WALLETS_JSON.read_text())
-        wallets = [w["proxy_wallet"] for w in data.get("wallets", [])]
-        logger.info("smart_wallets_loaded", count=len(wallets), path=str(_SMART_WALLETS_JSON))
-        return wallets
-    except (OSError, KeyError, json.JSONDecodeError):
-        return []
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    cutoff = time.time() - stale_days * 86400
+    wallets: dict[str, float] = {}
+    for w in data.get("wallets", []):
+        addr = str(w.get("proxy_wallet", "")).lower()
+        if not addr:
+            continue
+        score = float(w.get("score") or w.get("signal_score") or 0.0)
+        last_active = int(w.get("last_active_ts") or 0)
+        if score < min_score:
+            continue
+        if last_active and last_active < cutoff:
+            continue
+        wallets[addr] = score
+    logger.info(
+        "smart_wallets_loaded",
+        count=len(wallets),
+        path=str(path),
+        min_score=min_score,
+    )
+    return wallets
 
 
 class SmartMoneyStrategy(BaseStrategy):
@@ -65,8 +80,6 @@ class SmartMoneyStrategy(BaseStrategy):
         return self._goldsky
 
     def _fetch_once_per_cycle(self, lookback_minutes: int) -> list[OrderFilledEvent]:
-        # StrategyContext is rebuilt per (strategy, market), but we only want
-        # to hit Goldsky once per overall cycle.
         if self._cycle_events is None:
             self._cycle_events = self._client().recent_events(
                 lookback_minutes=lookback_minutes
@@ -74,23 +87,29 @@ class SmartMoneyStrategy(BaseStrategy):
         return self._cycle_events
 
     def reset_cycle_cache(self) -> None:
-        # Clear per-cycle snapshot; GoldskyClient keeps its rolling cache.
         self._cycle_events = None
 
     def evaluate(self, ctx: StrategyContext) -> SignalSet:
         cfg = ctx.config
-        # Dynamic list from weekly pipeline takes precedence; YAML list is fallback.
-        dynamic = _load_smart_wallets()
-        raw_wallets = dynamic if dynamic else cfg.get("wallets", [])
-        wallets = {w.lower() for w in raw_wallets}
-        if not wallets:
+        min_score = float(cfg.get("min_wallet_score", _DEFAULT_MIN_SCORE))
+        stale_days = int(cfg.get("stale_days", _DEFAULT_STALE_DAYS))
+
+        dynamic = _load_smart_wallets(min_score=min_score, stale_days=stale_days)
+        if dynamic:
+            wallet_scores = dynamic
+        else:
+            # YAML fallback: treat all at score 1.0.
+            wallet_scores = {str(w).lower(): 1.0 for w in cfg.get("wallets", [])}
+
+        if not wallet_scores:
             return SignalSet(
                 market_condition_id=ctx.market.condition_id,
                 rationale="No tracked wallets configured",
             )
 
         lookback_minutes = int(cfg.get("lookback_minutes", 60))
-        min_buys = int(cfg.get("min_wallet_buys", 2))
+        min_confluence_weight = Decimal(str(cfg.get("min_confluence_weight", "1.5")))
+        min_wallet_buys = int(cfg.get("min_wallet_buys", 2))
         max_price = Decimal(str(cfg.get("max_entry_price", "0.85")))
         size_usdc = Decimal(str(cfg.get("size_usdc", "10")))
 
@@ -103,25 +122,25 @@ class SmartMoneyStrategy(BaseStrategy):
 
         token_ids = {o.token_id for o in ctx.market.outcomes}
 
-        # Count distinct tracked wallets that BOUGHT each outcome token.
-        buys_by_token: dict[str, set[str]] = {t: set() for t in token_ids}
+        buyers_by_token: dict[str, set[str]] = {t: set() for t in token_ids}
         for ev in events:
             asset = ev.non_usdc_asset_id
             if asset not in token_ids:
                 continue
-            # A tracked wallet buying shows up as that wallet being the *taker*
-            # paying USDC OR the *maker* receiving USDC — poly_data's README
-            # confirms maker trades reflect the user's perspective w/ price.
-            if ev.taker.lower() in wallets and ev.taker_direction == "BUY":
-                buys_by_token[asset].add(ev.taker.lower())
-            elif ev.maker.lower() in wallets and ev.taker_direction == "SELL":
-                # maker_direction is opposite of taker_direction — if taker sold,
-                # maker bought.
-                buys_by_token[asset].add(ev.maker.lower())
+            if ev.taker.lower() in wallet_scores and ev.taker_direction == "BUY":
+                buyers_by_token[asset].add(ev.taker.lower())
+            elif ev.maker.lower() in wallet_scores and ev.taker_direction == "SELL":
+                # If taker sold, maker bought.
+                buyers_by_token[asset].add(ev.maker.lower())
 
         for outcome in ctx.market.outcomes:
-            wallet_count = len(buys_by_token.get(outcome.token_id, set()))
-            if wallet_count < min_buys:
+            buyers = buyers_by_token.get(outcome.token_id, set())
+            wallet_count = len(buyers)
+            total_weight = sum(wallet_scores[w] for w in buyers)
+
+            if wallet_count < min_wallet_buys:
+                continue
+            if Decimal(str(total_weight)) < min_confluence_weight:
                 continue
 
             entry_price = outcome.best_ask or outcome.price
@@ -138,6 +157,7 @@ class SmartMoneyStrategy(BaseStrategy):
             if size_shares <= 0:
                 continue
 
+            confidence = min(0.95, 0.3 + 0.15 * float(total_weight))
             return SignalSet(
                 market_condition_id=ctx.market.condition_id,
                 orders=[
@@ -150,10 +170,11 @@ class SmartMoneyStrategy(BaseStrategy):
                     )
                 ],
                 rationale=(
-                    f"{wallet_count} tracked wallet(s) bought {outcome.label} "
-                    f"in last {lookback_minutes}m; entering at {entry_price}"
+                    f"{wallet_count} tracked wallet(s) (weight={float(total_weight):.2f}) "
+                    f"bought {outcome.label} in last {lookback_minutes}m; "
+                    f"entering at {entry_price}"
                 ),
-                confidence=min(0.9, 0.4 + 0.15 * wallet_count),
+                confidence=confidence,
             )
 
         return SignalSet(

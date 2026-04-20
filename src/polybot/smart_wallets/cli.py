@@ -13,12 +13,13 @@ def _cmd_run(args: list[str]) -> None:
     import polybot.smart_wallets.pipeline as pipeline
 
     dry_run = "--dry-run" in args
+    async_enrich = "--async" in args
     limit = None
     for a in args:
         if a.startswith("--limit="):
             limit = int(a.split("=", 1)[1])
 
-    result = pipeline.run(dry_run=dry_run, candidate_limit=limit)
+    result = pipeline.run(dry_run=dry_run, candidate_limit=limit, async_enrich=async_enrich)
     print(
         f"\nRun #{result['run_id']} complete: "
         f"{result['n_candidates']} candidates → {result['n_selected']} selected"
@@ -62,7 +63,30 @@ def _cmd_status(args: list[str]) -> None:
         f"-{len(diff['removed'])} removed, "
         f"={len(diff['retained'])} retained"
     )
+    rejects = store.reject_histogram(latest["run_id"])
+    if rejects:
+        print("\nReject reasons:")
+        for reason, n in sorted(rejects.items(), key=lambda x: -x[1]):
+            print(f"  {reason}: {n}")
     store.close()
+
+
+def _cmd_backtest(args: list[str]) -> None:
+    from polybot.smart_wallets.backtest import evaluate_run
+
+    run_id = None
+    forward_days = 7
+    for a in args:
+        if a.startswith("--run="):
+            run_id = int(a.split("=", 1)[1])
+        elif a.startswith("--days="):
+            forward_days = int(a.split("=", 1)[1])
+    if run_id is None:
+        print("Usage: backtest --run=<run_id> [--days=7]")
+        sys.exit(1)
+
+    result = evaluate_run(run_id=run_id, forward_days=forward_days)
+    print(json.dumps(result.to_dict(), indent=2))
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -74,8 +98,10 @@ def main(argv: list[str] | None = None) -> None:
         _cmd_run(rest)
     elif cmd == "status":
         _cmd_status(rest)
+    elif cmd == "backtest":
+        _cmd_backtest(rest)
     else:
-        print(f"Unknown command: {cmd}. Use 'run' or 'status'.")
+        print(f"Unknown command: {cmd}. Use 'run', 'status', or 'backtest'.")
         sys.exit(1)
 
 
