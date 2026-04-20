@@ -49,8 +49,10 @@ ENRICH_WORKERS: int = 8
 MAX_RPS: float = 5.0  # requests per second cap
 
 # --- Goldsky-based seed (wallets with high recent volume) ---
-GOLDSKY_SEED_DAYS: int = 90
+GOLDSKY_SEED_DAYS: int = 3
 GOLDSKY_SEED_TOP_N: int = 1000  # top-N by buy-volume over the window
+GOLDSKY_CHUNK_DAYS: float = 1 / 24  # size of each parallel fetch chunk (1 hour)
+GOLDSKY_FETCH_WORKERS: int = 16     # concurrent chunk fetchers
 
 # --- sybil / wash clustering ---
 SYBIL_JACCARD_THRESHOLD: float = 0.6  # trade-market overlap above → collapse

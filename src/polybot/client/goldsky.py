@@ -6,10 +6,13 @@ strategies to see what the market is *doing*, not just its current snapshot.
 """
 from __future__ import annotations
 
+import pickle
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 
 import requests
 import structlog
@@ -92,6 +95,98 @@ class GoldskyClient:
 
         self._last_fetch_ts = now
         return list(self._event_cache)
+
+    def fetch_events_parallel(
+        self,
+        since_ts: int,
+        until_ts: int | None = None,
+        chunk_days: int = 1,
+        workers: int = 8,
+        cache_dir: Path | None = None,
+    ) -> list[OrderFilledEvent]:
+        """Fetch events over a large window using parallel chunks with disk caching.
+
+        Splits [since_ts, until_ts] into chunk_days-sized slices, loads any
+        already-cached slices from disk, and fetches the rest in parallel.
+        Completed slices (ending >1h ago) are written to cache for future runs.
+        """
+        until_ts = until_ts or int(time.time())
+        chunk_secs = int(chunk_days * 86400)
+        now = int(time.time())
+        cache_cutoff = now - 3600  # chunks ending before this are safe to cache
+
+        # Snap since_ts to the nearest chunk grid so boundaries are stable across runs.
+        since_ts = (since_ts // chunk_secs) * chunk_secs
+
+        # Build chunk boundaries
+        chunks: list[tuple[int, int]] = []
+        t = since_ts
+        while t < until_ts:
+            chunks.append((t, min(t + chunk_secs, until_ts)))
+            t += chunk_secs
+
+        results: list[list[OrderFilledEvent]] = [[] for _ in chunks]
+        to_fetch: list[tuple[int, int, int]] = []  # (index, since, until)
+
+        for i, (cs, cu) in enumerate(chunks):
+            cached = self._load_cache(cs, cu, cache_dir)
+            if cached is not None:
+                results[i] = cached
+                logger.debug("goldsky_chunk_cached", since=cs, until=cu)
+            else:
+                to_fetch.append((i, cs, cu))
+
+        if to_fetch:
+            logger.info(
+                "goldsky_parallel_start",
+                chunks_total=len(chunks),
+                chunks_to_fetch=len(to_fetch),
+                workers=workers,
+            )
+
+            def _fetch_chunk(cs: int, cu: int) -> list[OrderFilledEvent]:
+                # Each worker gets its own client/session to avoid thread-safety issues.
+                client = GoldskyClient(url=self._url, batch_size=self._batch_size)
+                try:
+                    return client.fetch_events_since(cs, cu)
+                finally:
+                    client.close()
+
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = {
+                    pool.submit(_fetch_chunk, cs, cu): (i, cs, cu)
+                    for i, cs, cu in to_fetch
+                }
+                for future in as_completed(futures):
+                    i, cs, cu = futures[future]
+                    try:
+                        events = future.result()
+                    except Exception as exc:
+                        logger.warning("goldsky_chunk_failed", since=cs, until=cu, error=str(exc))
+                        events = []
+                    results[i] = events
+                    if cache_dir and cu < cache_cutoff:
+                        self._save_cache(cs, cu, events, cache_dir)
+
+        # Merge, sort, deduplicate
+        seen: set[str] = set()
+        deduped: list[OrderFilledEvent] = []
+        for event in sorted(
+            (e for chunk in results for e in chunk),
+            key=lambda e: (e.timestamp, e.transaction_hash),
+        ):
+            if event.transaction_hash not in seen:
+                seen.add(event.transaction_hash)
+                deduped.append(event)
+
+        logger.info(
+            "goldsky_parallel_done",
+            count=len(deduped),
+            chunks=len(chunks),
+            fetched=len(to_fetch),
+            cached=len(chunks) - len(to_fetch),
+        )
+        return deduped
 
     def fetch_events_since(
         self,
@@ -188,6 +283,42 @@ class GoldskyClient:
                 logger.warning("goldsky_retry", attempt=attempt + 1, error=str(exc), wait=wait)
                 time.sleep(wait)
         return []
+
+    # --- disk cache helpers ---
+
+    def _cache_path(self, since_ts: int, until_ts: int, cache_dir: Path) -> Path:
+        return cache_dir / f"goldsky_{since_ts}_{until_ts}.pkl"
+
+    def _load_cache(
+        self, since_ts: int, until_ts: int, cache_dir: Path | None
+    ) -> list[OrderFilledEvent] | None:
+        if cache_dir is None:
+            return None
+        path = self._cache_path(since_ts, until_ts, cache_dir)
+        if not path.exists():
+            return None
+        try:
+            with path.open("rb") as fh:
+                return pickle.load(fh)
+        except Exception as exc:
+            logger.warning("goldsky_cache_load_error", path=str(path), error=str(exc))
+            return None
+
+    def _save_cache(
+        self,
+        since_ts: int,
+        until_ts: int,
+        events: list[OrderFilledEvent],
+        cache_dir: Path,
+    ) -> None:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        path = self._cache_path(since_ts, until_ts, cache_dir)
+        try:
+            with path.open("wb") as fh:
+                pickle.dump(events, fh)
+            logger.debug("goldsky_cache_saved", path=str(path), count=len(events))
+        except Exception as exc:
+            logger.warning("goldsky_cache_save_error", path=str(path), error=str(exc))
 
     @staticmethod
     def _parse_event(raw: dict) -> OrderFilledEvent:

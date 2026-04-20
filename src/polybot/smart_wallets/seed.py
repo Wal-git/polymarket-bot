@@ -14,6 +14,9 @@ import structlog
 
 from polybot.smart_wallets.api import DataAPIClient
 from polybot.smart_wallets.config import (
+    CACHE_DIR,
+    GOLDSKY_CHUNK_DAYS,
+    GOLDSKY_FETCH_WORKERS,
     GOLDSKY_SEED_DAYS,
     GOLDSKY_SEED_TOP_N,
     LEADERBOARD_LIMIT,
@@ -106,7 +109,12 @@ def _goldsky_top_volume_wallets(days: int, top_n: int) -> list[tuple[str, float]
     since_ts = int(time.time()) - days * 86400
     client = GoldskyClient()
     try:
-        events = client.fetch_events_since(since_ts=since_ts)
+        events = client.fetch_events_parallel(
+            since_ts=since_ts,
+            chunk_days=GOLDSKY_CHUNK_DAYS,
+            workers=GOLDSKY_FETCH_WORKERS,
+            cache_dir=CACHE_DIR / "goldsky",
+        )
     finally:
         client.close()
 

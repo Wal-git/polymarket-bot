@@ -65,7 +65,7 @@ class DataAPIClient:
     # ------------------------------------------------------------------
 
     def leaderboard(self, period: str, order: str = "pnl", limit: int = 500) -> list[dict]:
-        return self._get("/leaderboard", params={"period": period, "order": order, "limit": limit}) or []
+        return self._get("/v1/leaderboard", params={"period": period, "order": order, "limit": limit}) or []
 
     def activity(
         self,
