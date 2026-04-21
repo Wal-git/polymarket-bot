@@ -108,11 +108,21 @@ class DataAPIClient:
         return results
 
     def positions(self, user: str) -> list[dict]:
-        resp = self._get("/positions", params={"user": user, "sortBy": "CASHPNL", "limit": 500})
+        now = int(time.time())
+        resp = self._get_cached(
+            "/positions",
+            params={"user": user, "sortBy": "CASHPNL", "limit": 500},
+            cache_key=f"positions_{user}_{weekly_run_epoch(now)}",
+        )
         return resp or []
 
     def value(self, user: str) -> dict:
-        resp = self._get("/value", params={"user": user})
+        now = int(time.time())
+        resp = self._get_cached(
+            "/value",
+            params={"user": user},
+            cache_key=f"value_{user}_{weekly_run_epoch(now)}",
+        )
         if isinstance(resp, list):
             return resp[0] if resp else {}
         return resp or {}

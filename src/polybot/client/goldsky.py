@@ -103,6 +103,7 @@ class GoldskyClient:
         chunk_days: int = 1,
         workers: int = 8,
         cache_dir: Path | None = None,
+        extra_where: str = "",
     ) -> list[OrderFilledEvent]:
         """Fetch events over a large window using parallel chunks with disk caching.
 
@@ -129,7 +130,7 @@ class GoldskyClient:
         to_fetch: list[tuple[int, int, int]] = []  # (index, since, until)
 
         for i, (cs, cu) in enumerate(chunks):
-            cached = self._load_cache(cs, cu, cache_dir)
+            cached = self._load_cache(cs, cu, cache_dir, extra_where)
             if cached is not None:
                 results[i] = cached
                 logger.debug("goldsky_chunk_cached", since=cs, until=cu)
@@ -148,7 +149,7 @@ class GoldskyClient:
                 # Each worker gets its own client/session to avoid thread-safety issues.
                 client = GoldskyClient(url=self._url, batch_size=self._batch_size)
                 try:
-                    return client.fetch_events_since(cs, cu)
+                    return client.fetch_events_since(cs, cu, extra_where=extra_where)
                 finally:
                     client.close()
 
@@ -166,7 +167,7 @@ class GoldskyClient:
                         events = []
                     results[i] = events
                     if cache_dir and cu < cache_cutoff:
-                        self._save_cache(cs, cu, events, cache_dir)
+                        self._save_cache(cs, cu, events, cache_dir, extra_where)
 
         # Merge, sort, deduplicate
         seen: set[str] = set()
@@ -359,15 +360,19 @@ class GoldskyClient:
 
     # --- disk cache helpers ---
 
-    def _cache_path(self, since_ts: int, until_ts: int, cache_dir: Path) -> Path:
-        return cache_dir / f"goldsky_{since_ts}_{until_ts}.pkl"
+    def _cache_path(self, since_ts: int, until_ts: int, cache_dir: Path, extra_where: str = "") -> Path:
+        suffix = ""
+        if extra_where:
+            import hashlib
+            suffix = "_" + hashlib.sha1(extra_where.encode()).hexdigest()[:8]
+        return cache_dir / f"goldsky_{since_ts}_{until_ts}{suffix}.pkl"
 
     def _load_cache(
-        self, since_ts: int, until_ts: int, cache_dir: Path | None
+        self, since_ts: int, until_ts: int, cache_dir: Path | None, extra_where: str = ""
     ) -> list[OrderFilledEvent] | None:
         if cache_dir is None:
             return None
-        path = self._cache_path(since_ts, until_ts, cache_dir)
+        path = self._cache_path(since_ts, until_ts, cache_dir, extra_where)
         if not path.exists():
             return None
         try:
@@ -383,9 +388,10 @@ class GoldskyClient:
         until_ts: int,
         events: list[OrderFilledEvent],
         cache_dir: Path,
+        extra_where: str = "",
     ) -> None:
         cache_dir.mkdir(parents=True, exist_ok=True)
-        path = self._cache_path(since_ts, until_ts, cache_dir)
+        path = self._cache_path(since_ts, until_ts, cache_dir, extra_where)
         try:
             with path.open("wb") as fh:
                 pickle.dump(events, fh)
