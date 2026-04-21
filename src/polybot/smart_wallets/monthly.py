@@ -74,25 +74,37 @@ def _bulk_events(
     wallets: list[str],
     since_ts: int,
 ) -> list[OrderFilledEvent]:
+    """Fetch events for wallets with parallel fetching and batched wallet queries.
+
+    Batches wallets to avoid large IN clause timeouts on the Goldsky API.
+    """
     if not wallets:
         return []
-    addr_list = '["' + '", "'.join(w.lower() for w in wallets) + '"]'
+
     cache_dir = CACHE_DIR / "goldsky_monthly"
+    batch_size = 10
     seen: set[str] = set()
     all_events: list[OrderFilledEvent] = []
-    for field in ("taker_in", "maker_in"):
-        extra = f"{field}: {addr_list}"
-        events = gold.fetch_events_parallel(
-            since_ts=since_ts,
-            chunk_days=1,
-            workers=8,
-            cache_dir=cache_dir,
-            extra_where=extra,
-        )
-        for ev in events:
-            if ev.transaction_hash not in seen:
-                seen.add(ev.transaction_hash)
-                all_events.append(ev)
+
+    # Batch wallets to reduce query complexity
+    for batch_idx in range(0, len(wallets), batch_size):
+        batch = wallets[batch_idx : batch_idx + batch_size]
+        addr_list = '["' + '", "'.join(w.lower() for w in batch) + '"]'
+
+        for field in ("taker_in", "maker_in"):
+            extra = f"{field}: {addr_list}"
+            events = gold.fetch_events_parallel(
+                since_ts=since_ts,
+                chunk_days=1,
+                workers=8,
+                cache_dir=cache_dir,
+                extra_where=extra,
+            )
+            for ev in events:
+                if ev.transaction_hash not in seen:
+                    seen.add(ev.transaction_hash)
+                    all_events.append(ev)
+
     return all_events
 
 
