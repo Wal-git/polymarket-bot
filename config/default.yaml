@@ -38,10 +38,10 @@ strategies:
         - "0x8516cc7ba51b0dc7a332d4462df1aff47ae393a0"  # #9: $287K verified PnL
         - "0x1b4d7cbd8dce8a56dd2c51e952cccbf55f78e246"  # #10: $215K verified PnL
       lookback_minutes: 1440
-      # Require at least 1 wallet (adjust to 2 once you see signals)
-      min_wallet_buys: 1
+      # Require at least 2 wallets (adjust to 2 once you see signals)
+      min_wallet_buys: 2
       # Minimum sum of wallet scores across buyers (confluence gate).
-      min_confluence_weight: 0.5
+      min_confluence_weight: 1.5
       # Don't chase outcomes priced above 0.75 — edge disappears at high prices.
       max_entry_price: 0.75
       # Base size; scales proportionally with confluence weight up to max_weight_cap.
