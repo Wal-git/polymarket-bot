@@ -1,5 +1,5 @@
 bot:
-  poll_interval_seconds: 30
+  poll_interval_seconds: 60
   dry_run: false
   state_file: ./data/state.json
   log_level: INFO
