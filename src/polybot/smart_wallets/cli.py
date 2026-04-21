@@ -89,6 +89,36 @@ def _cmd_backtest(args: list[str]) -> None:
     print(json.dumps(result.to_dict(), indent=2))
 
 
+def _cmd_leaderboard(args: list[str]) -> None:
+    from polybot.smart_wallets.monthly import run
+
+    dry_run = "--dry-run" in args
+    top_n = 500
+    for a in args:
+        if a.startswith("--top="):
+            top_n = int(a.split("=", 1)[1])
+
+    result = run(top_n=top_n, dry_run=dry_run)
+    wallets = result["wallets"]
+    print(
+        f"\nMonthly leaderboard — {len(wallets)} wallets"
+        + (" [DRY RUN]" if dry_run else "")
+    )
+    print(
+        f"{'#':<4} {'wallet':<14} {'reported':>12} {'verified':>12} {'divergence':>12} {'trades':>7}"
+    )
+    print("-" * 65)
+    for rank, w in enumerate(wallets[:20], 1):
+        addr = w["proxy_wallet"][:12] + "…"
+        print(
+            f"{rank:<4} {addr:<14}"
+            f" ${w['reported_pnl_30d']:>10,.0f}"
+            f" ${w['verified_pnl_30d']:>10,.0f}"
+            f" ${w['pnl_divergence']:>+10,.0f}"
+            f" {w['trades_count']:>7}"
+        )
+
+
 def _cmd_trail_backtest(args: list[str]) -> None:
     from polybot.smart_wallets.trail_backtest import run_trail_backtest
 
@@ -126,8 +156,10 @@ def main(argv: list[str] | None = None) -> None:
         _cmd_backtest(rest)
     elif cmd == "trail-backtest":
         _cmd_trail_backtest(rest)
+    elif cmd == "leaderboard":
+        _cmd_leaderboard(rest)
     else:
-        print(f"Unknown command: {cmd}. Use 'run', 'status', 'backtest', or 'trail-backtest'.")
+        print(f"Unknown command: {cmd}. Use 'run', 'status', 'backtest', 'trail-backtest', or 'leaderboard'.")
         sys.exit(1)
 
 
