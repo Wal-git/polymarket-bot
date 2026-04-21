@@ -1,0 +1,8 @@
+[2m2026-04-19T14:45:32.646310Z[0m [[32m[1minfo     [0m] [1mstrategy_loaded               [0m [36mmodule[0m=[35mstrategies.smart_money[0m [36mname[0m=[35msmart_money[0m
+
+Bot started — mode: LIVE
+Strategies: ['smart_money']
+Poll interval: 30s
+
+[2m2026-04-19T14:46:09.126749Z[0m [[32m[1minfo     [0m] [1mfetched_markets               [0m [36mcount[0m=[35m1227[0m
+[2m2026-04-19T14:46:09.873847Z[0m [[32m[1minfo     [0m] [1mclob_connected                [0m

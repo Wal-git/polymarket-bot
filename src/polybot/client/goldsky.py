@@ -69,10 +69,17 @@ class OrderFilledEvent:
 
 
 class GoldskyClient:
-    def __init__(self, url: str = GOLDSKY_URL, batch_size: int = 1000, max_retries: int = 5):
+    def __init__(
+        self,
+        url: str = GOLDSKY_URL,
+        batch_size: int = 1000,
+        max_retries: int = 5,
+        request_timeout: int = 60,
+    ):
         self._url = url
         self._batch_size = batch_size
         self._max_retries = max_retries
+        self._request_timeout = request_timeout
         self._session = requests.Session()
         # Rolling cache: stores events within the last lookback window
         self._event_cache: list[OrderFilledEvent] = []
@@ -229,29 +236,35 @@ class GoldskyClient:
         since_ts: int,
         until_ts: int | None = None,
         exclude_platform_wallets: bool = True,
+        batch_size: int = 10,
     ) -> list[OrderFilledEvent]:
         """Fetch events where any of ``wallets`` is taker or maker.
 
-        Issues two paginated queries (taker_in and maker_in) and merges
-        results, deduplicating by transaction hash.
+        Batches wallets into groups to avoid query timeouts, issues paginated
+        queries for each batch, and merges results with deduplication.
         """
         if not wallets:
             return []
         until_ts = until_ts or int(time.time())
-        addr_list = '["' + '", "'.join(w.lower() for w in wallets) + '"]'
 
         seen: set[str] = set()
         all_events: list[OrderFilledEvent] = []
-        for field in ("taker_in", "maker_in"):
-            for ev in self.fetch_events_since(
-                since_ts,
-                until_ts=until_ts,
-                exclude_platform_wallets=exclude_platform_wallets,
-                extra_where=f"{field}: {addr_list}",
-            ):
-                if ev.transaction_hash not in seen:
-                    seen.add(ev.transaction_hash)
-                    all_events.append(ev)
+
+        # Batch wallets to avoid large IN clause timeouts
+        for i in range(0, len(wallets), batch_size):
+            batch = wallets[i : i + batch_size]
+            addr_list = '["' + '", "'.join(w.lower() for w in batch) + '"]'
+
+            for field in ("taker_in", "maker_in"):
+                for ev in self.fetch_events_since(
+                    since_ts,
+                    until_ts=until_ts,
+                    exclude_platform_wallets=exclude_platform_wallets,
+                    extra_where=f"{field}: {addr_list}",
+                ):
+                    if ev.transaction_hash not in seen:
+                        seen.add(ev.transaction_hash)
+                        all_events.append(ev)
 
         return sorted(all_events, key=lambda e: (e.timestamp, e.transaction_hash))
 
@@ -346,7 +359,9 @@ class GoldskyClient:
 
         for attempt in range(self._max_retries):
             try:
-                resp = self._session.post(self._url, json={"query": query}, timeout=30)
+                resp = self._session.post(
+                    self._url, json={"query": query}, timeout=self._request_timeout
+                )
                 resp.raise_for_status()
                 data = resp.json()
                 if "errors" in data:
