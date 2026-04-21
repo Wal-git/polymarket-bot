@@ -6,7 +6,7 @@ Or directly: ``streamlit run src/polybot/dashboard/app.py``
 from __future__ import annotations
 
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
+# from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(
     page_title="POLYBOT",
@@ -19,7 +19,8 @@ from polybot.dashboard.data_loader import inject_styles  # noqa: E402
 
 inject_styles()
 
-st_autorefresh(interval=10_000, key="polybot_home_refresh")
+# st_autorefresh(interval=10_000, key="polybot_home_refresh")
+# Auto-refresh disabled: use browser refresh (F5) to see live updates
 
 from polybot.dashboard.data_loader import (  # noqa: E402
     latest_cycle,
