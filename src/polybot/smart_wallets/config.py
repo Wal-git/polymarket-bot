@@ -66,3 +66,8 @@ SMART_WALLETS_JSON: Path = DATA_DIR / "smart_wallets.json"
 SMART_WALLETS_SIGNAL_JSON: Path = DATA_DIR / "smart_wallets_signal.json"
 SMART_WALLETS_CLOSER_JSON: Path = DATA_DIR / "smart_wallets_closer.json"
 SMART_WALLETS_DB: Path = DATA_DIR / "smart_wallets.db"
+SMART_WALLETS_MONTHLY_JSON: Path = DATA_DIR / "smart_wallets_monthly.json"
+
+# --- monthly leaderboard ---
+MONTHLY_LOOKBACK_DAYS: int = 30
+MONTHLY_TOP_N: int = 500

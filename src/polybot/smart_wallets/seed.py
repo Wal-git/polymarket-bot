@@ -20,12 +20,46 @@ from polybot.smart_wallets.config import (
     GOLDSKY_SEED_DAYS,
     GOLDSKY_SEED_TOP_N,
     LEADERBOARD_LIMIT,
+    MONTHLY_TOP_N,
 )
 
 logger = structlog.get_logger()
 
 _PERIODS = ["7d", "30d", "all"]
 _ORDERS = ["pnl", "volume"]
+
+
+def _normalize_leaderboard_row(row: dict, source: str = "") -> dict | None:
+    """Extract and normalize fields from a single leaderboard API row."""
+    wallet = (row.get("proxyWallet") or row.get("proxy_wallet") or "").lower()
+    if not wallet:
+        return None
+    return {
+        "proxy_wallet": wallet,
+        "username": row.get("name") or row.get("username") or "",
+        "leaderboard_pnl": _to_float(row.get("pnl") or row.get("pnlPerShare")),
+        "leaderboard_volume": _to_float(row.get("volume")),
+        "sources": {source} if source else set(),
+    }
+
+
+def fetch_monthly_pnl_leaders(
+    client: DataAPIClient,
+    limit: int = MONTHLY_TOP_N,
+) -> list[dict]:
+    """Fetch the 30d-by-PnL leaderboard and return normalized wallet rows."""
+    rows = client.leaderboard(period="30d", order="pnl", limit=limit)
+    if not isinstance(rows, list):
+        logger.warning("monthly_leaderboard_bad_response")
+        return []
+    result = []
+    for row in rows:
+        normalized = _normalize_leaderboard_row(row, source="lb:30d:pnl")
+        if normalized:
+            normalized["sources"] = sorted(normalized["sources"])
+            result.append(normalized)
+    logger.info("monthly_leaderboard_fetched", count=len(result))
+    return result
 
 
 def fetch_candidates(
@@ -46,27 +80,14 @@ def fetch_candidates(
                 logger.warning("leaderboard_bad_response", period=period, order=order)
                 continue
             for row in rows:
-                wallet = (row.get("proxyWallet") or row.get("proxy_wallet") or "").lower()
-                if not wallet:
+                normalized = _normalize_leaderboard_row(row, source=f"lb:{period}:{order}")
+                if not normalized:
                     continue
-                entry = seen.setdefault(
-                    wallet,
-                    {
-                        "proxy_wallet": wallet,
-                        "username": "",
-                        "leaderboard_pnl": 0.0,
-                        "leaderboard_volume": 0.0,
-                        "sources": set(),
-                    },
-                )
-                entry["username"] = entry["username"] or (row.get("name") or row.get("username") or "")
-                entry["leaderboard_pnl"] = max(
-                    entry["leaderboard_pnl"],
-                    _to_float(row.get("pnl") or row.get("pnlPerShare")),
-                )
-                entry["leaderboard_volume"] = max(
-                    entry["leaderboard_volume"], _to_float(row.get("volume"))
-                )
+                wallet = normalized["proxy_wallet"]
+                entry = seen.setdefault(wallet, {**normalized, "sources": set()})
+                entry["username"] = entry["username"] or normalized["username"]
+                entry["leaderboard_pnl"] = max(entry["leaderboard_pnl"], normalized["leaderboard_pnl"])
+                entry["leaderboard_volume"] = max(entry["leaderboard_volume"], normalized["leaderboard_volume"])
                 entry["sources"].add(f"lb:{period}:{order}")
             logger.info("leaderboard_fetched", period=period, order=order, seen=len(seen))
 
