@@ -299,19 +299,39 @@ def render_sidebar() -> None:
 
         if bal:
             try:
-                bal_f = float(bal["balance"])
+                clob_f = float(bal["balance"])
+                portfolio_f = float(bal["portfolio_value"]) if "portfolio_value" in bal else None
+                total_f = float(bal["total_value"]) if "total_value" in bal else clob_f
                 import time as _time
                 bal_age = int(_time.time() - float(bal.get("ts", 0)))
                 age_str = f"{bal_age}s ago" if bal_age < 120 else f"{bal_age // 60}m ago"
+                portfolio_row = ""
+                if portfolio_f is not None:
+                    portfolio_row = f"""
+  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:0.3rem;">
+    <div style="font-family:'Inter',sans-serif;font-size:0.7rem;color:#848E9C;">Polymarket wallet</div>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-size:1rem;font-weight:600;
+                color:#848E9C;font-variant-numeric:tabular-nums;">${portfolio_f:,.2f}</div>
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:baseline;
+              border-top:1px solid rgba(255,255,255,0.06);margin-top:0.3rem;padding-top:0.3rem;">
+    <div style="font-family:'Inter',sans-serif;font-size:0.7rem;color:#EAECEF;font-weight:600;">Total</div>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-size:1.1rem;font-weight:700;
+                color:#EAECEF;font-variant-numeric:tabular-nums;">${total_f:,.2f}</div>
+  </div>"""
                 st.markdown(f"""
 <div style="margin:0.5rem 0 0.25rem 0;">
   <div style="font-family:'Inter',sans-serif;font-size:0.65rem;font-weight:500;
-              letter-spacing:0.1em;text-transform:uppercase;color:#848E9C;margin-bottom:0.15rem;">
-    Wallet Balance (USDC)</div>
-  <div style="font-family:'Barlow Condensed',sans-serif;font-size:2rem;
-              font-weight:700;color:#F0B90B;font-variant-numeric:tabular-nums;line-height:1;">
-    ${bal_f:,.2f}</div>
-  <div style="font-family:'Inter',sans-serif;font-size:0.65rem;color:#848E9C;margin-top:0.15rem;">
+              letter-spacing:0.1em;text-transform:uppercase;color:#848E9C;margin-bottom:0.4rem;">
+    Balance (USDC)</div>
+  <div style="display:flex;justify-content:space-between;align-items:baseline;">
+    <div style="font-family:'Inter',sans-serif;font-size:0.7rem;color:#848E9C;">CLOB (tradeable)</div>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-size:1.6rem;
+                font-weight:700;color:#F0B90B;font-variant-numeric:tabular-nums;line-height:1;">
+      ${clob_f:,.2f}</div>
+  </div>
+  {portfolio_row}
+  <div style="font-family:'Inter',sans-serif;font-size:0.65rem;color:#848E9C;margin-top:0.25rem;">
     updated {age_str}</div>
 </div>""", unsafe_allow_html=True)
             except (TypeError, ValueError):
