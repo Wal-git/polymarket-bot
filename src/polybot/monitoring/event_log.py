@@ -38,7 +38,22 @@ class EventLog:
     def emit_signal(self, **fields: Any) -> None:
         self._append(self._signals, {"ts": _now_iso(), **fields})
 
+    def emit_evaluation(self, **fields: Any) -> None:
+        evals = self._dir / "evaluations.jsonl"
+        self._append(evals, {"ts": _now_iso(), **fields})
+
     def _append(self, path: Path, record: dict[str, Any]) -> None:
         line = json.dumps(record, default=_json_default)
         with path.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
+
+
+_DEFAULT_EVALS = Path("./data/evaluations.jsonl")
+
+
+def emit_evaluation(**fields: Any) -> None:
+    """Module-level convenience — writes to ./data/evaluations.jsonl."""
+    _DEFAULT_EVALS.parent.mkdir(parents=True, exist_ok=True)
+    line = json.dumps({"ts": _now_iso(), **fields}, default=_json_default)
+    with _DEFAULT_EVALS.open("a", encoding="utf-8") as f:
+        f.write(line + "\n")

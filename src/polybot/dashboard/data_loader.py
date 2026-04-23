@@ -18,6 +18,8 @@ import yaml
 _STATE_FILE = Path("data/state.json")
 _CYCLES_FILE = Path("data/cycles.jsonl")
 _SIGNALS_FILE = Path("data/signals.jsonl")
+_EVALS_FILE = Path("data/evaluations.jsonl")
+_BOT_LOG_FILE = Path("data/bot.log")
 _CONFIG_FILE = Path("config/default.yaml")
 
 
@@ -37,6 +39,20 @@ def load_cycles(last_n: int = 200) -> list[dict]:
 @st.cache_data(ttl=5)
 def load_signals(last_n: int = 200) -> list[dict]:
     return _tail_jsonl(_SIGNALS_FILE, last_n)
+
+
+@st.cache_data(ttl=5)
+def load_evaluations(last_n: int = 200) -> list[dict]:
+    return _tail_jsonl(_EVALS_FILE, last_n)
+
+
+@st.cache_data(ttl=5)
+def load_bot_log(last_n: int = 100) -> list[str]:
+    try:
+        lines = _BOT_LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
+        return lines[-last_n:]
+    except FileNotFoundError:
+        return []
 
 
 @st.cache_data(ttl=30)
@@ -74,9 +90,15 @@ def latest_cycle() -> dict:
     return cycles[0] if cycles else {}
 
 
+def latest_evaluation() -> dict:
+    evals = load_evaluations(last_n=1)
+    return evals[0] if evals else {}
+
+
 def cycle_age_seconds() -> float | None:
-    cycle = latest_cycle()
-    ts = cycle.get("ts")
+    # Prefer evaluations (new BTC engine) over cycles (old engine)
+    record = latest_evaluation() or latest_cycle()
+    ts = record.get("ts")
     if not ts:
         return None
     try:
@@ -193,11 +215,13 @@ html, body, [class*="css"] { font-family: 'Inter', Arial, sans-serif !important;
 
 
 def render_sidebar() -> None:
-    """Render the persistent sidebar: status, HALT toggle, last cycle, balance."""
+    """Render the persistent sidebar: status, HALT toggle, last eval, balance."""
     halt_path = get_halt_path()
     is_halted = halt_path.exists()
-    cycle = latest_cycle()
+    cfg = load_config()
+    dry_run = cfg.get("bot", {}).get("dry_run", True)
     age = cycle_age_seconds()
+    state = load_state()
 
     with st.sidebar:
         if is_halted:
@@ -205,7 +229,7 @@ def render_sidebar() -> None:
                 '<div class="status-badge halted">⊗ &nbsp;BOT HALTED</div>',
                 unsafe_allow_html=True,
             )
-        elif cycle.get("dry_run"):
+        elif dry_run:
             st.markdown(
                 '<div class="status-badge dryrun">◉ &nbsp;DRY RUN</div>',
                 unsafe_allow_html=True,
@@ -229,40 +253,42 @@ def render_sidebar() -> None:
                 halt_path.write_text("halt\n", encoding="utf-8")
                 st.cache_data.clear()
                 st.rerun()
-            st.caption("Takes effect after the current cycle.")
+            st.caption("Takes effect after the current slot.")
 
         st.markdown("---")
 
         if age is None:
-            st.markdown("**Cycle** — no data yet")
+            st.markdown("**Last eval** — no data yet")
         elif age < 60:
-            st.markdown(f"**Last cycle** — {int(age)}s ago")
+            st.markdown(f"**Last eval** — {int(age)}s ago")
         elif age < 600:
-            st.markdown(f"**Last cycle** — {int(age / 60)}m ago")
+            st.markdown(f"**Last eval** — {int(age / 60)}m ago")
         else:
             st.markdown(
-                f'<span style="color:#F6465D">**Last cycle** — {int(age / 60)}m ago ⚠ stale</span>',
+                f'<span style="color:#F6465D">**Last eval** — {int(age / 60)}m ago ⚠ stale</span>',
                 unsafe_allow_html=True,
             )
 
-        balance = cycle.get("balance")
-        if balance:
-            try:
-                bal_f = float(balance)
-                st.markdown(f"""
+        positions = state.get("positions", [])
+        trades = state.get("trades", [])
+        realized = sum(float(p.get("realized_pnl") or 0) for p in positions)
+        unrealized = sum(float(p.get("unrealized_pnl") or 0) for p in positions)
+        total_pnl = realized + unrealized
+        pnl_color = "#0ECB81" if total_pnl >= 0 else "#F6465D"
+        pnl_str = f"+${total_pnl:,.2f}" if total_pnl >= 0 else f"-${abs(total_pnl):,.2f}"
+
+        st.markdown(f"""
 <div style="margin:0.5rem 0 0.25rem 0;">
   <div style="font-family:'Inter',sans-serif;font-size:0.65rem;font-weight:500;
-              letter-spacing:0.1em;text-transform:uppercase;color:#848E9C;
-              margin-bottom:0.15rem;">Balance (USDC.e)</div>
+              letter-spacing:0.1em;text-transform:uppercase;color:#848E9C;margin-bottom:0.15rem;">
+    Total P&L</div>
   <div style="font-family:'Barlow Condensed',sans-serif;font-size:1.6rem;
-              font-weight:700;color:#F0B90B;font-variant-numeric:tabular-nums;
-              line-height:1;">${bal_f:,.2f}</div>
+              font-weight:700;color:{pnl_color};font-variant-numeric:tabular-nums;line-height:1;">
+    {pnl_str}</div>
 </div>""", unsafe_allow_html=True)
-            except (TypeError, ValueError):
-                pass
 
-        positions_count = cycle.get("open_positions", 0)
-        st.markdown(f"**Open positions** — {positions_count}")
+        st.markdown(f"**Open positions** — {len(positions)}")
+        st.markdown(f"**Total trades** — {len(trades)}")
 
         st.markdown("---")
         st.caption("Auto-refreshes every 10s")

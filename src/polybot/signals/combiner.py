@@ -4,6 +4,7 @@ import structlog
 
 from polybot.feeds.orderbook_ws import OrderBookWS
 from polybot.models.btc_market import BtcPrices, Direction, SlotInfo, TradeSignal
+from polybot.monitoring.event_log import emit_evaluation
 from polybot.signals.divergence import detect_divergence
 from polybot.signals.imbalance import calculate_imbalance, detect_smart_entry
 
@@ -33,30 +34,67 @@ def should_trade(
     window = (float(window_cfg[0]), float(window_cfg[1]))
     depth = int(imb_cfg.get("depth_levels", 10))
 
+    binance_delta = round(prices.binance - slot.price_to_beat, 2)
+    coinbase_delta = round(prices.coinbase - slot.price_to_beat, 2)
+
+    _base = dict(
+        slug=slot.slug,
+        price_to_beat=slot.price_to_beat,
+        binance=round(prices.binance, 2),
+        coinbase=round(prices.coinbase, 2),
+        binance_delta=binance_delta,
+        coinbase_delta=coinbase_delta,
+    )
+
     # Signal 1: price divergence
     div_direction = detect_divergence(prices, slot.price_to_beat, min_gap_usd=min_gap)
     if div_direction is None:
         logger.debug("no_divergence", slug=slot.slug)
+        emit_evaluation(
+            **_base,
+            div_direction=None,
+            imb_direction=None,
+            imbalance_ratio=None,
+            confluence=False,
+            confidence=None,
+            size_usdc=None,
+            direction=None,
+            reject_reason="no_divergence",
+        )
         return None
 
     # Signal 2: order-book imbalance in smart-money window
     history = book_ws.get_imbalance_history()
+    window_readings = [r for r in history if window[0] <= r.seconds_since_open <= window[1]]
+    window_ratio = round(max((r.ratio for r in window_readings), default=0.0), 3) if window_readings else None
+
     imb_direction = detect_smart_entry(history, threshold_buy, threshold_sell, window)
     if imb_direction is None or imb_direction != div_direction:
+        reject = "no_imbalance" if imb_direction is None else "direction_mismatch"
         logger.debug(
             "no_imbalance_confluence",
             slug=slot.slug,
             div=div_direction,
             imb=imb_direction,
         )
+        emit_evaluation(
+            **_base,
+            div_direction=div_direction.value,
+            imb_direction=imb_direction.value if imb_direction else None,
+            imbalance_ratio=window_ratio,
+            confluence=False,
+            confidence=None,
+            size_usdc=None,
+            direction=None,
+            reject_reason=reject,
+        )
         return None
 
     # Both agree — compute confidence and Kelly size
-    binance_delta = abs(prices.binance - slot.price_to_beat)
     token_id = slot.up_token_id if div_direction == Direction.UP else slot.down_token_id
     snapshot = book_ws.get_snapshot(token_id)
     imbalance = calculate_imbalance(snapshot, depth=depth)
-    confidence = min(0.95, 0.6 + binance_delta / 500.0 + abs(imbalance - 1.0) / 5.0)
+    confidence = min(0.95, 0.6 + abs(binance_delta) / 500.0 + abs(imbalance - 1.0) / 5.0)
 
     from polybot.execution.sizing import kelly_size
     size = kelly_size(
@@ -75,6 +113,19 @@ def should_trade(
         confidence=round(confidence, 3),
         size_usdc=round(size, 2),
         imbalance=imbalance,
-        binance_delta=round(binance_delta, 2),
+        binance_delta=binance_delta,
     )
+
+    emit_evaluation(
+        **_base,
+        div_direction=div_direction.value,
+        imb_direction=div_direction.value,
+        imbalance_ratio=round(imbalance, 3),
+        confluence=True,
+        confidence=round(confidence, 3),
+        size_usdc=round(size, 2),
+        direction=div_direction.value,
+        reject_reason=None,
+    )
+
     return TradeSignal(direction=div_direction, confidence=round(confidence, 3), size_usdc=size)

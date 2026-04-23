@@ -1,6 +1,6 @@
 bot:
   poll_interval_seconds: 1          # price polling cadence
-  dry_run: true                     # DEFAULT TRUE — flip to false only after paper trade passes
+  dry_run: false                    # LIVE trading enabled
   state_file: ./data/state.json
   halt_file: ./HALT
   log_level: INFO
