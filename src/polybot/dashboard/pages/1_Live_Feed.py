@@ -22,7 +22,12 @@ def _render_eval_card(ev: dict, result: dict | None = None) -> None:
     badge_color = "#0ECB81" if is_conf else ("#F0B90B" if reject == "direction_mismatch" else "#F6465D")
     badge_text = "TRADE" if is_conf else reject.upper().replace("_", " ")
 
-    ts = (ev.get("ts") or "")[:19].replace("T", " ")
+    try:
+        from datetime import datetime, timezone, timedelta
+        _PDT = timezone(timedelta(hours=-7))
+        ts = datetime.fromisoformat(ev.get("ts") or "").astimezone(_PDT).strftime("%-I:%M %p PDT")
+    except Exception:
+        ts = (ev.get("ts") or "")[:19].replace("T", " ")
     slug = ev.get("slug", "—")
     ptb = ev.get("price_to_beat") or 0
     binance = ev.get("binance") or 0
@@ -44,31 +49,9 @@ def _render_eval_card(ev: dict, result: dict | None = None) -> None:
     c_delta_color = "#0ECB81" if c_delta > 0 else "#F6465D"
     ratio_str = f"{imb_ratio:.3f}" if imb_ratio is not None else "n/a"
 
-    trade_line = ""
-    if is_conf and confidence is not None:
-        dir_color = "#0ECB81" if direction == "UP" else "#F6465D"
-        outcome_html = ""
-        if result is not None:
-            won = result.get("won", False)
-            pnl = result.get("pnl", 0)
-            outcome_color = "#0ECB81" if won else "#F6465D"
-            outcome_label = "WIN" if won else "LOSS"
-            pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
-            outcome_html = (
-                f'&nbsp;·&nbsp; <span style="color:{outcome_color};font-weight:700;">'
-                f'{outcome_label} {pnl_str}</span>'
-            )
-        trade_line = f"""
-        <div style="margin-top:0.5rem;padding:0.4rem 0.6rem;background:rgba(14,203,129,0.06);border-radius:3px;font-family:'Inter',sans-serif;font-size:0.82rem;">
-            <span style="color:{dir_color};font-weight:700;">▲ {direction}</span>
-            &nbsp;·&nbsp; <span style="color:#F0B90B;font-weight:600;">${size_usdc:.2f}</span> USDC
-            &nbsp;·&nbsp; confidence <span style="color:#0ECB81;font-weight:600;">{confidence:.1%}</span>
-            {outcome_html}
-        </div>"""
-
     st.markdown(f"""
-    <div style="padding:0.75rem 1rem;margin:0.4rem 0;background:rgba(255,255,255,0.02);
-                border-left:3px solid {border};border-radius:4px;">
+    <div style="padding:0.75rem 1rem;margin:0.4rem 0 0 0;background:rgba(255,255,255,0.02);
+                border-left:3px solid {border};border-radius:4px 4px 0 0;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
             <div>
                 <span style="font-family:'Barlow Condensed',sans-serif;font-size:0.95rem;
@@ -100,9 +83,34 @@ def _render_eval_card(ev: dict, result: dict | None = None) -> None:
             <span style="color:{div_color};">{div_icon} Divergence: <strong>{div_dir or 'none'}</strong></span>
             <span style="color:{imb_color};">{imb_icon} Imbalance: <strong>{ratio_str}</strong> → {imb_dir or 'none'}</span>
         </div>
-        {trade_line}
     </div>
     """, unsafe_allow_html=True)
+
+    if is_conf and confidence is not None:
+        dir_color = "#0ECB81" if direction == "UP" else "#F6465D"
+        outcome_parts = [
+            f'<span style="color:{dir_color};font-weight:700;">▲ {direction}</span>',
+            f'<span style="color:#848E9C;">·</span> <span style="color:#F0B90B;font-weight:600;">${size_usdc:.2f} USDC</span>',
+            f'<span style="color:#848E9C;">·</span> <span style="color:#EAECEF;">confidence {confidence:.1%}</span>',
+        ]
+        if result is not None:
+            won = result.get("won", False)
+            pnl = result.get("pnl", 0)
+            outcome_color = "#0ECB81" if won else "#F6465D"
+            outcome_label = "WIN" if won else "LOSS"
+            pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
+            outcome_parts.append(
+                f'<span style="color:#848E9C;">·</span> '
+                f'<span style="color:{outcome_color};font-weight:700;">{outcome_label} {pnl_str}</span>'
+            )
+        row = " &nbsp; ".join(outcome_parts)
+        st.markdown(
+            f'<div style="padding:0.4rem 1rem 0.75rem 1rem;margin:0 0 0.4rem 0;'
+            f'background:rgba(255,255,255,0.02);border-left:3px solid {border};'
+            f'border-radius:0 0 4px 4px;font-family:\'Inter\',sans-serif;font-size:0.82rem;">'
+            f'{row}</div>',
+            unsafe_allow_html=True,
+        )
 
 
 col1, col2 = st.columns([3, 1])

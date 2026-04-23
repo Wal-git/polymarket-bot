@@ -22,6 +22,7 @@ async def execute_entry(
     tracker: PositionTracker,
     dry_run: bool,
     entry_window: tuple[int, int] = (60, 180),
+    signal_ts: Optional[float] = None,
 ) -> Optional[str]:
     """Place a limit BUY order within the 60-180s entry window.
 
@@ -62,6 +63,7 @@ async def execute_entry(
         limit_price=price,
     )
 
+    fill_ts = time.time()
     order_id = clob.place_order(order, dry_run=dry_run)
     tracker.record_fill(
         token_id=token_id,
@@ -71,6 +73,10 @@ async def execute_entry(
         market_question=slot.slug,
         outcome_label=signal.direction.value,
     )
+
+    signal_to_fill = round(fill_ts - signal_ts, 3) if signal_ts else None
+    slot_elapsed = round(fill_ts - slot_start_sec, 1)
+
     logger.info(
         "entry_placed",
         slug=slot.slug,
@@ -78,6 +84,26 @@ async def execute_entry(
         price=str(price),
         size=str(size),
         confidence=signal.confidence,
+        signal_to_fill_s=signal_to_fill,
+        slot_elapsed_s=slot_elapsed,
         dry_run=dry_run,
     )
+
+    from polybot.monitoring.event_log import emit_execution
+    emit_execution(
+        slug=slot.slug,
+        status="filled",
+        direction=signal.direction.value,
+        signal_price=float(signal.size_usdc / float(size)) if size else None,
+        fill_price=float(price),
+        price_slippage=round(float(price) - (signal.size_usdc / float(size)), 4) if size else None,
+        size_shares=float(size),
+        size_usdc=float(price * size),
+        confidence=signal.confidence,
+        signal_to_fill_s=signal_to_fill,
+        slot_elapsed_s=slot_elapsed,
+        order_id=order_id or "dry-run",
+        dry_run=dry_run,
+    )
+
     return order_id or "dry-run"

@@ -66,3 +66,14 @@ def emit_result(**fields: Any) -> None:
     line = json.dumps({"ts": _now_iso(), **fields}, default=_json_default)
     with _DEFAULT_RESULTS.open("a", encoding="utf-8") as f:
         f.write(line + "\n")
+
+
+_DEFAULT_EXECUTIONS = Path("./data/executions.jsonl")
+
+
+def emit_execution(**fields: Any) -> None:
+    """Write an order placement or block record to ./data/executions.jsonl."""
+    _DEFAULT_EXECUTIONS.parent.mkdir(parents=True, exist_ok=True)
+    line = json.dumps({"ts": _now_iso(), **fields}, default=_json_default)
+    with _DEFAULT_EXECUTIONS.open("a", encoding="utf-8") as f:
+        f.write(line + "\n")

@@ -136,6 +136,7 @@ class MarketLifecycle:
             self._state = LifecycleState.RESOLVED
             return
 
+        signal_ts = time.time()
         logger.info(
             "signal_fired",
             slug=self.slot.slug,
@@ -157,6 +158,17 @@ class MarketLifecycle:
                 balance=round(live_balance, 2),
                 required=min_usdc,
             )
+            from polybot.monitoring.event_log import emit_execution
+            emit_execution(
+                slug=self.slot.slug,
+                status="blocked",
+                block_reason="insufficient_balance",
+                direction=signal.direction.value,
+                confidence=signal.confidence,
+                size_usdc=round(signal.size_usdc, 2),
+                balance_at_block=round(live_balance, 2),
+                required_usdc=min_usdc,
+            )
             self._state = LifecycleState.RESOLVED
             return
 
@@ -168,6 +180,7 @@ class MarketLifecycle:
             tracker=self._tracker,
             dry_run=self._dry_run,
             entry_window=(window_start, window_end),
+            signal_ts=signal_ts,
         )
 
         if order_id is None and not self._dry_run:

@@ -1,5 +1,7 @@
-"""Open positions, recent fills, and P&L breakdown."""
+"""Trade history with outcomes, timestamps in Pacific time."""
 from __future__ import annotations
+
+from datetime import datetime, timezone, timedelta
 
 import pandas as pd
 import streamlit as st
@@ -9,6 +11,7 @@ st.set_page_config(page_title="Positions — POLYBOT", page_icon="◇", layout="
 
 from polybot.dashboard.data_loader import (  # noqa: E402
     inject_styles,
+    load_results,
     load_state,
     render_sidebar,
 )
@@ -17,68 +20,96 @@ inject_styles()
 st_autorefresh(interval=10_000, key="positions_refresh")
 render_sidebar()
 
-st.markdown('<div class="page-header">◇ POSITIONS</div>', unsafe_allow_html=True)
+st.markdown('<div class="page-header">◇ TRADE HISTORY</div>', unsafe_allow_html=True)
+
+PDT = timezone(timedelta(hours=-7))
+
+def _to_pdt(iso: str) -> str:
+    try:
+        dt = datetime.fromisoformat(iso).astimezone(PDT)
+        return dt.strftime("%-I:%M %p")
+    except Exception:
+        return iso[:19]
 
 state = load_state()
-positions = state.get("positions", [])
 trades = state.get("trades", [])
-
-if not positions:
-    st.info("No open positions.")
-else:
-    rows = []
-    total_cost = 0.0
-    total_unrealized = 0.0
-    for p in positions:
-        shares = float(p.get("shares") or 0)
-        entry = float(p.get("avg_entry_price") or 0)
-        current = float(p.get("current_price") or 0)
-        unrealized = float(p.get("unrealized_pnl") or 0)
-        cost_basis = shares * entry
-        total_cost += cost_basis
-        total_unrealized += unrealized
-        rows.append({
-            "Market": (p.get("market_question") or "")[:60],
-            "Outcome": p.get("outcome_label") or "",
-            "Shares": f"{shares:.4f}",
-            "Avg Entry": f"${entry:.4f}",
-            "Current": f"${current:.4f}" if current else "—",
-            "Cost Basis": f"${cost_basis:,.2f}",
-            "Unrealized P&L": f"${unrealized:+,.2f}",
-        })
-
-    col1, col2 = st.columns(2)
-    pnl_class = "positive" if total_unrealized >= 0 else "negative"
-    pnl_str = f"+${total_unrealized:,.2f}" if total_unrealized >= 0 else f"-${abs(total_unrealized):,.2f}"
-    with col1:
-        st.markdown(f"""
-        <div class="kpi-block">
-            <div class="kpi-label">Total Cost Basis</div>
-            <div class="kpi-value">${total_cost:,.2f}</div>
-        </div>""", unsafe_allow_html=True)
-    with col2:
-        st.markdown(f"""
-        <div class="kpi-block">
-            <div class="kpi-label">Unrealized P&L</div>
-            <div class="kpi-value {pnl_class}">{pnl_str}</div>
-        </div>""", unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
-st.markdown("<br>", unsafe_allow_html=True)
-st.markdown('<div class="page-header">RECENT TRADES</div>', unsafe_allow_html=True)
+results = load_results()
 
 if not trades:
     st.info("No trades recorded yet.")
 else:
     rows = []
-    for t in reversed(trades[-50:]):
+    total_pnl = 0.0
+    wins = 0
+    losses = 0
+
+    for t in reversed(trades):
+        slug = t.get("market_question", "")
+        result = results.get(slug)
+        won = result.get("won") if result else None
+        pnl = result.get("pnl") if result else None
+
+        if pnl is not None:
+            total_pnl += pnl
+            if won:
+                wins += 1
+            else:
+                losses += 1
+
+        if won is True:
+            outcome = "✅ WIN"
+        elif won is False:
+            outcome = "❌ LOSS"
+        else:
+            outcome = "⏳ Pending"
+
+        pnl_str = f"+${pnl:.2f}" if pnl is not None and pnl >= 0 else (f"-${abs(pnl):.2f}" if pnl is not None else "—")
+
         rows.append({
-            "Time": (t.get("timestamp") or "")[:19].replace("T", " "),
-            "Side": t.get("side") or "",
-            "Size": float(t.get("size") or 0),
-            "Price": f"${float(t.get('price') or 0):.4f}",
-            "Market": (t.get("market_question") or "")[:60],
+            "Time (PDT)": _to_pdt(t.get("timestamp", "")),
+            "Market": slug.replace("btc-updown-5m-", ""),
+            "Direction": t.get("side", ""),
+            "Shares": f"{float(t.get('size') or 0):.2f}",
+            "Entry": f"${float(t.get('price') or 0):.2f}",
+            "Stake": f"${float(t.get('size') or 0) * float(t.get('price') or 0):.2f}",
+            "Outcome": outcome,
+            "P&L": pnl_str,
+        })
+
+    # Summary KPIs
+    c1, c2, c3, c4 = st.columns(4)
+    pnl_color = "#0ECB81" if total_pnl >= 0 else "#F6465D"
+    pnl_sign = "+" if total_pnl >= 0 else ""
+    with c1:
+        st.markdown(f"""<div class="kpi-block"><div class="kpi-label">Trades</div>
+        <div class="kpi-value">{len(rows)}</div></div>""", unsafe_allow_html=True)
+    with c2:
+        st.markdown(f"""<div class="kpi-block"><div class="kpi-label">Wins</div>
+        <div class="kpi-value" style="color:#0ECB81">{wins}</div></div>""", unsafe_allow_html=True)
+    with c3:
+        st.markdown(f"""<div class="kpi-block"><div class="kpi-label">Losses</div>
+        <div class="kpi-value" style="color:#F6465D">{losses}</div></div>""", unsafe_allow_html=True)
+    with c4:
+        st.markdown(f"""<div class="kpi-block"><div class="kpi-label">Net P&L</div>
+        <div class="kpi-value" style="color:{pnl_color}">{pnl_sign}${total_pnl:.2f}</div></div>""",
+        unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+# Open positions (if any)
+positions = state.get("positions", [])
+if positions:
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown('<div class="page-header">OPEN POSITIONS</div>', unsafe_allow_html=True)
+    rows = []
+    for p in positions:
+        shares = float(p.get("shares") or 0)
+        entry = float(p.get("avg_entry_price") or 0)
+        rows.append({
+            "Market": (p.get("market_question") or "")[-10:],
+            "Shares": f"{shares:.2f}",
+            "Entry": f"${entry:.2f}",
+            "Cost Basis": f"${shares * entry:.2f}",
         })
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
