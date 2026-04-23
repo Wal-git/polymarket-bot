@@ -205,8 +205,10 @@ class MarketLifecycle:
                 pnl=pnl_str,
             )
         else:
-            # Market resolved — tell CLOB to sync on-chain balance so winnings
-            # are visible before the next slot tries to size a trade
+            # Market resolved — redeem winning CTF tokens on-chain then sync CLOB
+            from polybot.execution.redeem import maybe_redeem
+            from polybot.auth.wallet import get_private_key
+            maybe_redeem(get_private_key(), self._clob.client)
             self._clob.sync_balance_allowance()
             invalidate_cache()
 
