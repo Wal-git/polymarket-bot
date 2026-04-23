@@ -21,6 +21,7 @@ st_autorefresh(interval=10_000, key="polybot_home_refresh")
 
 from polybot.dashboard.data_loader import (  # noqa: E402
     latest_evaluation,
+    load_balance,
     load_config,
     load_evaluations,
     load_state,
@@ -33,6 +34,7 @@ cfg = load_config()
 state = load_state()
 evals = load_evaluations(last_n=200)
 last_eval = latest_evaluation()
+bal = load_balance()
 
 positions = state.get("positions", [])
 trades = state.get("trades", [])
@@ -53,7 +55,9 @@ def _pnl_class(v: float) -> str:
 def _fmt_pnl(v: float) -> str:
     return f"+${v:,.2f}" if v >= 0 else f"-${abs(v):,.2f}"
 
-col1, col2, col3, col4, col5 = st.columns(5)
+bal_f = float(bal.get("balance", 0)) if bal else 0.0
+
+col1, col2, col3, col4, col5, col6 = st.columns(6)
 
 with col1:
     st.markdown(f"""
@@ -93,6 +97,14 @@ with col5:
     <div class="kpi-block">
         <div class="kpi-label">Signal Rate</div>
         <div class="kpi-value amber">{conf_rate}</div>
+    </div>""", unsafe_allow_html=True)
+
+with col6:
+    bal_display = f"${bal_f:,.2f}" if bal else "—"
+    st.markdown(f"""
+    <div class="kpi-block">
+        <div class="kpi-label">Wallet Balance (USDC)</div>
+        <div class="kpi-value amber">{bal_display}</div>
     </div>""", unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)

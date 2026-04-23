@@ -20,6 +20,7 @@ _CYCLES_FILE = Path("data/cycles.jsonl")
 _SIGNALS_FILE = Path("data/signals.jsonl")
 _EVALS_FILE = Path("data/evaluations.jsonl")
 _BOT_LOG_FILE = Path("data/bot.log")
+_BALANCE_FILE = Path("data/balance.json")
 _CONFIG_FILE = Path("config/default.yaml")
 
 
@@ -39,6 +40,14 @@ def load_cycles(last_n: int = 200) -> list[dict]:
 @st.cache_data(ttl=5)
 def load_signals(last_n: int = 200) -> list[dict]:
     return _tail_jsonl(_SIGNALS_FILE, last_n)
+
+
+@st.cache_data(ttl=10)
+def load_balance() -> dict[str, Any]:
+    try:
+        return json.loads(_BALANCE_FILE.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
 
 
 @st.cache_data(ttl=5)
@@ -222,6 +231,7 @@ def render_sidebar() -> None:
     dry_run = cfg.get("bot", {}).get("dry_run", True)
     age = cycle_age_seconds()
     state = load_state()
+    bal = load_balance()
 
     with st.sidebar:
         if is_halted:
@@ -286,6 +296,26 @@ def render_sidebar() -> None:
               font-weight:700;color:{pnl_color};font-variant-numeric:tabular-nums;line-height:1;">
     {pnl_str}</div>
 </div>""", unsafe_allow_html=True)
+
+        if bal:
+            try:
+                bal_f = float(bal["balance"])
+                import time as _time
+                bal_age = int(_time.time() - float(bal.get("ts", 0)))
+                age_str = f"{bal_age}s ago" if bal_age < 120 else f"{bal_age // 60}m ago"
+                st.markdown(f"""
+<div style="margin:0.5rem 0 0.25rem 0;">
+  <div style="font-family:'Inter',sans-serif;font-size:0.65rem;font-weight:500;
+              letter-spacing:0.1em;text-transform:uppercase;color:#848E9C;margin-bottom:0.15rem;">
+    Wallet Balance (USDC)</div>
+  <div style="font-family:'Barlow Condensed',sans-serif;font-size:2rem;
+              font-weight:700;color:#F0B90B;font-variant-numeric:tabular-nums;line-height:1;">
+    ${bal_f:,.2f}</div>
+  <div style="font-family:'Inter',sans-serif;font-size:0.65rem;color:#848E9C;margin-top:0.15rem;">
+    updated {age_str}</div>
+</div>""", unsafe_allow_html=True)
+            except (TypeError, ValueError):
+                pass
 
         st.markdown(f"**Open positions** — {len(positions)}")
         st.markdown(f"**Total trades** — {len(trades)}")
