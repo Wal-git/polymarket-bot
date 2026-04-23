@@ -54,6 +54,7 @@ class BtcEngine:
                 pass  # Windows
 
         active: dict[str, MarketLifecycle] = {}
+        attempted: set[str] = set()  # slugs already tried this run
 
         while self._running:
             if self._halt_file.exists():
@@ -84,8 +85,8 @@ class BtcEngine:
                         )
                     del active[slug]
 
-            # Launch lifecycle for current slot if not already running
-            if current_slug not in active and now_ms < current_end_ms:
+            # Launch lifecycle for current slot if not already running or attempted
+            if current_slug not in active and current_slug not in attempted and now_ms < current_end_ms:
                 slot = await fetch_slot_details(current_slug)
                 if slot:
                     console.print(
@@ -100,14 +101,16 @@ class BtcEngine:
                         config=self._config,
                     )
                     active[current_slug] = lc
+                    attempted.add(current_slug)
                     lc.start()
                 else:
+                    attempted.add(current_slug)
                     logger.warning("slot_unavailable", slug=current_slug)
 
             # Pre-warm next slot 30s before current ends
             next_slug = get_slug(1)
             time_to_next_slot_ms = get_slot_ts(1)[0] - now_ms
-            if time_to_next_slot_ms < 30_000 and next_slug not in active:
+            if time_to_next_slot_ms < 30_000 and next_slug not in active and next_slug not in attempted:
                 slot = await fetch_slot_details(next_slug)
                 if slot:
                     lc = MarketLifecycle(
@@ -118,6 +121,7 @@ class BtcEngine:
                         config=self._config,
                     )
                     active[next_slug] = lc
+                    attempted.add(next_slug)
                     lc.start()
 
             await asyncio.sleep(1)

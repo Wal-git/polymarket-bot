@@ -5,6 +5,7 @@ from typing import Optional
 import httpx
 import structlog
 
+from polybot.feeds.btc_price import fetch_btc_prices
 from polybot.models.btc_market import SlotInfo
 
 logger = structlog.get_logger()
@@ -62,13 +63,20 @@ async def fetch_slot_details(slug: str) -> Optional[SlotInfo]:
             logger.warning("slot_missing_token_ids", slug=slug)
             return None
 
-        # price_to_beat is the open price set by Chainlink at slot start
+        # price_to_beat is the open price set by Chainlink at slot start.
+        # The Gamma API rarely exposes it — fall back to live BTC mid-price
+        # captured at slot discovery time, which closely tracks Chainlink.
         price_to_beat = float(
             market.get("startPrice")
             or market.get("openPrice")
             or event.get("startPrice")
             or 0
         )
+        if price_to_beat == 0:
+            prices = await fetch_btc_prices()
+            if prices is not None:
+                price_to_beat = round((prices.binance + prices.coinbase) / 2, 2)
+                logger.info("price_to_beat_live_fallback", slug=slug, price=price_to_beat)
 
         start_ms, end_ms = slot_from_slug(slug)
         return SlotInfo(
