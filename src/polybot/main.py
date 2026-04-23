@@ -1,8 +1,13 @@
+import asyncio
+import subprocess
+import sys
+from pathlib import Path
+
 import typer
 from rich.console import Console
 from rich.table import Table
 
-app = typer.Typer(name="polybot", help="Automated Polymarket trading bot")
+app = typer.Typer(name="polybot", help="BTC 5-minute Polymarket signal engine")
 console = Console()
 
 
@@ -10,79 +15,108 @@ console = Console()
 def setup():
     """One-time wallet and API key setup wizard."""
     from polybot.auth.wallet import run_setup_wizard
-
     run_setup_wizard()
 
 
 @app.command()
 def run(config: str = typer.Option("config/default.yaml", help="Path to config file")):
-    """Start the bot with the main polling loop."""
-    from polybot.bot import build_bot
-
-    engine = build_bot(config)
-    engine.start()
-
-
-@app.command(name="dry-run")
-def dry_run(config: str = typer.Option("config/default.yaml", help="Path to config file")):
-    """Run one cycle in dry-run mode — no real orders."""
-    from polybot.bot import build_bot
-
-    engine = build_bot(config)
-    engine.run_once()
+    """Start the 5-minute BTC engine (honours dry_run in config)."""
+    from polybot.bot import build_engine
+    engine = build_engine(config)
+    asyncio.run(engine.run())
 
 
 @app.command()
-def positions(config: str = typer.Option("config/default.yaml", help="Path to config file")):
-    """Show open positions and P&L."""
+def balance(config: str = typer.Option("config/default.yaml", help="Path to config file")):
+    """Show live USDC balance and open positions."""
+    from polybot.auth.wallet import load_env
     from polybot.bot import load_config
+    from polybot.client.clob import CLOBClient
     from polybot.monitoring.tracker import PositionTracker
 
+    load_env()
     cfg = load_config(config)
-    tracker = PositionTracker(state_file=cfg.get("bot", {}).get("state_file", "./data/state.json"))
+    clob = CLOBClient()
+    usdc = clob.get_balance()
+    console.print(f"\n[bold]USDC Balance:[/] ${usdc:,.2f}")
 
+    tracker = PositionTracker(cfg.get("bot", {}).get("state_file", "./data/state.json"))
     if not tracker.positions:
-        console.print("[yellow]No open positions[/]")
+        console.print("[dim]No open positions[/]")
         return
 
     table = Table(title="Open Positions")
-    table.add_column("Market", style="cyan", max_width=40)
-    table.add_column("Outcome", style="green")
+    table.add_column("Slug", style="cyan", max_width=30)
+    table.add_column("Direction", style="green")
     table.add_column("Shares", justify="right")
     table.add_column("Avg Entry", justify="right")
-    table.add_column("Current", justify="right")
     table.add_column("Unrealized P&L", justify="right")
-
     for pos in tracker.positions:
         pnl_style = "green" if pos.unrealized_pnl >= 0 else "red"
         table.add_row(
-            pos.market_question[:40],
+            pos.market_question[:30],
             pos.outcome_label,
             str(pos.shares),
             f"${pos.avg_entry_price:.4f}",
-            f"${pos.current_price:.4f}",
             f"[{pnl_style}]${pos.unrealized_pnl:.2f}[/]",
         )
-
     console.print(table)
     console.print(f"\nTotal P&L: ${tracker.total_pnl():.2f}")
 
 
 @app.command()
-def dashboard(
-    port: int = typer.Option(8501, help="Port to serve the Streamlit dashboard"),
-    address: str = typer.Option("localhost", help="Bind address (use 0.0.0.0 to expose)"),
+def backtest(
+    days: int = typer.Option(30, help="Number of historical days to replay"),
+    config: str = typer.Option("config/default.yaml", help="Path to config file"),
 ):
-    """Launch the Streamlit dashboard for monitoring signals and positions."""
-    import subprocess
-    import sys
-    from pathlib import Path
+    """Replay historical BTC 5-min markets to validate strategy parameters."""
+    from polybot.backtest.harness import run_backtest
+    from polybot.bot import load_config
+    cfg = load_config(config)
+    asyncio.run(run_backtest(days=days, config=cfg))
 
-    app_path = Path(__file__).parent / "dashboard" / "app.py"
-    if not app_path.exists():
-        console.print(f"[red]Dashboard app not found at {app_path}[/]")
+
+@app.command(name="cli")
+def cli_proxy(args: list[str] = typer.Argument(None, help="polymarket-cli subcommand and args")):
+    """Proxy to the Rust polymarket-cli binary (tools/polymarket-cli)."""
+    binary = Path(__file__).parent.parent.parent / "tools" / "polymarket-cli" / "target" / "release" / "polymarket-cli"
+    if not binary.exists():
+        # Fall back to PATH
+        binary = Path("polymarket-cli")
+    try:
+        result = subprocess.run([str(binary)] + (args or []))
+        raise typer.Exit(result.returncode)
+    except FileNotFoundError:
+        console.print(
+            "[red]polymarket-cli binary not found. "
+            "Run: cd tools/polymarket-cli && cargo build --release[/]"
+        )
         raise typer.Exit(1)
 
+
+@app.command()
+def agents(args: list[str] = typer.Argument(None, help="agents module subcommand")):
+    """Proxy to the agents/ LLM analysis module (requires [llm] extra)."""
+    try:
+        from polybot.agents.cli import agents_app
+        agents_app(args or [], standalone_mode=False)
+    except ImportError:
+        console.print(
+            "[red]agents module not available. Install with: pip install -e '.[llm]'[/]"
+        )
+        raise typer.Exit(1)
+
+
+@app.command()
+def dashboard(
+    port: int = typer.Option(8501, help="Streamlit port"),
+    address: str = typer.Option("localhost", help="Bind address"),
+):
+    """Launch the Streamlit monitoring dashboard."""
+    app_path = Path(__file__).parent / "dashboard" / "app.py"
+    if not app_path.exists():
+        console.print(f"[red]Dashboard not found at {app_path}[/]")
+        raise typer.Exit(1)
     try:
         subprocess.run(
             [
@@ -102,13 +136,11 @@ def dashboard(
 
 @app.command(name="cancel-all")
 def cancel_all():
-    """Emergency: cancel all open orders."""
+    """Emergency: cancel all open orders on the CLOB."""
     from polybot.auth.wallet import load_env
     from polybot.client.clob import CLOBClient
-
     load_env()
-    clob = CLOBClient()
-    clob.cancel_all()
+    CLOBClient().cancel_all()
     console.print("[bold green]All orders cancelled[/]")
 
 

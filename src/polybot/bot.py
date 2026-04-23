@@ -4,52 +4,32 @@ import yaml
 
 from polybot.auth.wallet import load_env
 from polybot.client.clob import CLOBClient
-from polybot.client.gamma import GammaClient
-from polybot.execution.order_manager import OrderManager
-from polybot.monitoring.event_log import EventLog
+from polybot.engine.scheduler import BtcEngine
 from polybot.monitoring.logger import setup_logging
 from polybot.monitoring.tracker import PositionTracker
-from polybot.safety.risk_manager import RiskManager
-from polybot.scheduler.engine import Engine
-from polybot.strategies.registry import load_strategies
 
 
 def load_config(config_path: str = "config/default.yaml") -> dict:
     return yaml.safe_load(Path(config_path).read_text())
 
 
-def build_bot(config_path: str = "config/default.yaml") -> Engine:
+def build_engine(config_path: str = "config/default.yaml") -> BtcEngine:
     config = load_config(config_path)
     bot_cfg = config.get("bot", {})
     risk_cfg = config.get("risk", {})
-    market_cfg = config.get("market_filter", {})
 
     setup_logging(bot_cfg.get("log_level", "INFO"))
     load_env()
 
-    dry_run = bot_cfg.get("dry_run", True)
-
-    gamma = GammaClient(
-        min_volume=market_cfg.get("min_volume_24h_usdc", 1000),
-        max_markets=market_cfg.get("max_markets_per_cycle"),
-    )
     clob = CLOBClient()
     state_file = bot_cfg.get("state_file", "./data/state.json")
     tracker = PositionTracker(state_file=state_file)
-    risk_manager = RiskManager(**risk_cfg)
-    order_manager = OrderManager(clob=clob, tracker=tracker, dry_run=dry_run)
-    strategies = load_strategies(config.get("strategies", []))
-    event_log = EventLog(data_dir=Path(state_file).parent)
 
-    return Engine(
-        strategies=strategies,
-        gamma=gamma,
+    return BtcEngine(
         clob=clob,
-        order_manager=order_manager,
         tracker=tracker,
-        risk_manager=risk_manager,
-        poll_interval=bot_cfg.get("poll_interval_seconds", 30),
-        dry_run=dry_run,
+        dry_run=bot_cfg.get("dry_run", True),
+        config=config,
         halt_file=bot_cfg.get("halt_file", "./HALT"),
-        event_log=event_log,
+        daily_loss_limit=float(risk_cfg.get("daily_loss_limit_usdc", 100.0)),
     )
