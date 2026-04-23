@@ -1,5 +1,5 @@
 bot:
-  poll_interval_seconds: 30
+  poll_interval_seconds: 60
   dry_run: false
   state_file: ./data/state.json
   log_level: INFO
@@ -25,6 +25,8 @@ strategies:
     module: strategies.smart_money
     enabled: true
     config:
+<<<<<<< feat/smart-money-trailing-improvements
+      # YAML wallets are the fallback if smart_wallets_signal.json doesn't exist yet.
       wallets:
         - "0x9d84ce0306f8551e02efef1680475fc0f1dc1344"  # domah
         - "0x3cf3e8d5427aed066a7a5926980600f6c3cf87b3"  # 50pence
@@ -32,6 +34,32 @@ strategies:
         - "0x7c3db723f1d4d8cb9c550095203b686cb11e5c6b"  # car
         - "0x56687bf447db6ffa42ffe2204a05edaa20f55839"  # theo4
       lookback_minutes: 60
-      min_wallet_buys: 1
-      max_entry_price: 0.95
+      # Require at least 2 distinct wallets to buy the same outcome.
+=======
+      # Top 10 verified performers from monthly leaderboard (30d lookback)
+      wallets:
+        - "0xead152b855effa6b5b5837f53b24c0756830c76a"  # #1: $13.0M verified PnL
+        - "0x8a6c6811e8937f9e8afc1b9249fa540262c30b3f"  # #2: $8.8M verified PnL
+        - "0x32ed517a571c01b6e9adecf61ba81ca48ff2f960"  # #3: $1.7M verified PnL
+        - "0xe16d3f2a5807999b358affd9445c3a09e45e5e30"  # #4: $1.5M verified PnL
+        - "0x53757615de1c42b83f893b79d4241a009dc2aeea"  # #5: $1.5M verified PnL
+        - "0xf28e42d20e4826f2b10a24bc952001697947cab2"  # #6: $713K verified PnL
+        - "0xd1ed12197b7dc22dede923727e9b714024dbd7cb"  # #7: $686K verified PnL
+        - "0xe734e7bf7cfb9e464681f71822f6c2f6be514f0c"  # #8: $347K verified PnL
+        - "0x8516cc7ba51b0dc7a332d4462df1aff47ae393a0"  # #9: $287K verified PnL
+        - "0x1b4d7cbd8dce8a56dd2c51e952cccbf55f78e246"  # #10: $215K verified PnL
+      lookback_minutes: 1440
+      # Require at least 2 wallets (adjust to 2 once you see signals)
+>>>>>>> main
+      min_wallet_buys: 2
+      # Minimum sum of wallet scores across buyers (confluence gate).
+      min_confluence_weight: 1.5
+      # Don't chase outcomes priced above 0.75 — edge disappears at high prices.
+      max_entry_price: 0.75
+      # Base size; scales proportionally with confluence weight up to max_weight_cap.
       size_usdc: 10
+      max_weight_cap: 5.0
+      # Skip entry if current ask is >10% above whale's avg fill price.
+      max_price_slippage_pct: 0.10
+      # Minimum minutes between signals on the same market.
+      cooldown_minutes: 15

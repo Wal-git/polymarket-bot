@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import structlog
 
-from polybot.models.types import OrderRequest, Position, SignalSet
+from polybot.models.types import OrderRequest, Position, Side, SignalSet
 
 logger = structlog.get_logger()
 
@@ -42,6 +42,11 @@ class RiskManager:
             valid_orders: list[OrderRequest] = []
             reasons: list[str] = []
             for order in signal.orders:
+                # SELL orders reduce exposure — skip buy-side caps entirely.
+                if order.side == Side.SELL:
+                    valid_orders.append(order)
+                    continue
+
                 if order.size > self._max_bet:
                     logger.warning("order_capped", original=str(order.size), cap=str(self._max_bet))
                     order = order.model_copy(update={"size": self._max_bet})

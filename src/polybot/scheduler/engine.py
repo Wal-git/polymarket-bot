@@ -100,6 +100,16 @@ class Engine:
                     reset()
                 config = getattr(strategy, "_config", {})
 
+                pre = getattr(strategy, "pre_cycle", None)
+                if callable(pre):
+                    for token_id in pre(positions, config):
+                        logger.info(
+                            "smart_money_exit_triggered",
+                            strategy=strategy.NAME,
+                            token_id=token_id,
+                        )
+                        self._order_manager.close_position(token_id)
+
                 # Pass 1: evaluate all markets using Gamma prices — no CLOB calls.
                 # This is fast and filters down to only markets worth enriching.
                 candidate_markets = []
