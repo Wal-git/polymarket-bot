@@ -211,5 +211,8 @@ class MarketLifecycle:
             maybe_redeem(get_private_key(), self._clob.client)
             self._clob.sync_balance_allowance()
             invalidate_cache()
+            # Remove from tracker — position settled on-chain, no sell order needed
+            self._tracker.close_position(token_id)
+            self._tracker.save()
 
         self._state = LifecycleState.RESOLVED
