@@ -1,65 +1,49 @@
 bot:
-  poll_interval_seconds: 60
-  dry_run: false
+  poll_interval_seconds: 1          # price polling cadence
+  dry_run: true                     # DEFAULT TRUE — flip to false only after paper trade passes
   state_file: ./data/state.json
-  log_level: INFO
   halt_file: ./HALT
+  log_level: INFO
 
-market_filter:
-  min_volume_24h_usdc: 10000
+strategy:
+  name: btc_5min
+  market_filter:
+    asset: BTC
+    window: 5m
+    slug_prefix: "btc-updown-5m-"
+
+  signals:
+    divergence:
+      min_gap_usd: 50.0             # Both Binance & Coinbase must be this far past price_to_beat
+      require_chainlink_gap: true
+    imbalance:
+      buy_threshold: 1.8            # bid/ask ratio >= this → bullish
+      sell_threshold: 0.55          # bid/ask ratio <= this → bearish
+      detection_window_seconds: [30, 90]   # smart-money entry window
+      depth_levels: 10
+
+  entry:
+    window_seconds: [60, 180]       # skip signals outside this range after market open
+    order_type: LIMIT
+    price: best_ask
+
+  exit:
+    profit_target: 0.75             # sell when shares hit 75c
+    stop_loss: 0.35                 # sell when shares drop to 35c
+    hold_to_resolution_s_remaining: 60   # if less than 60s left, hold to resolution
+
+  sizing:
+    mode: kelly
+    kelly_fraction: 0.25            # quarter-Kelly safety cap
+    min_trade_usdc: 10
+    max_trade_usdc: 200
+
+  bankroll:
+    source: wallet_balance          # live USDC balance; alternative: "fixed"
+    safety_cap_pct: 1.0             # fraction of wallet usable as bankroll
 
 risk:
-  max_total_exposure_pct: 0.20
+  max_open_positions: 2
+  daily_loss_limit_usdc: 100        # kill switch: stop new entries at -$100/day
+  max_total_exposure_pct: 0.50
   max_position_usdc: 200
-  max_single_bet_usdc: 50
-  stop_loss_pct: 0.30
-
-strategies:
-  - name: example
-    module: polybot.strategies.example
-    enabled: false
-    config:
-      min_edge: 0.05
-
-  - name: smart_money
-    module: strategies.smart_money
-    enabled: true
-    config:
-<<<<<<< feat/smart-money-trailing-improvements
-      # YAML wallets are the fallback if smart_wallets_signal.json doesn't exist yet.
-      wallets:
-        - "0x9d84ce0306f8551e02efef1680475fc0f1dc1344"  # domah
-        - "0x3cf3e8d5427aed066a7a5926980600f6c3cf87b3"  # 50pence
-        - "0x6356fb47642a028bc09df92023c35a21a0b41885"  # fhantom
-        - "0x7c3db723f1d4d8cb9c550095203b686cb11e5c6b"  # car
-        - "0x56687bf447db6ffa42ffe2204a05edaa20f55839"  # theo4
-      lookback_minutes: 60
-      # Require at least 2 distinct wallets to buy the same outcome.
-=======
-      # Top 10 verified performers from monthly leaderboard (30d lookback)
-      wallets:
-        - "0xead152b855effa6b5b5837f53b24c0756830c76a"  # #1: $13.0M verified PnL
-        - "0x8a6c6811e8937f9e8afc1b9249fa540262c30b3f"  # #2: $8.8M verified PnL
-        - "0x32ed517a571c01b6e9adecf61ba81ca48ff2f960"  # #3: $1.7M verified PnL
-        - "0xe16d3f2a5807999b358affd9445c3a09e45e5e30"  # #4: $1.5M verified PnL
-        - "0x53757615de1c42b83f893b79d4241a009dc2aeea"  # #5: $1.5M verified PnL
-        - "0xf28e42d20e4826f2b10a24bc952001697947cab2"  # #6: $713K verified PnL
-        - "0xd1ed12197b7dc22dede923727e9b714024dbd7cb"  # #7: $686K verified PnL
-        - "0xe734e7bf7cfb9e464681f71822f6c2f6be514f0c"  # #8: $347K verified PnL
-        - "0x8516cc7ba51b0dc7a332d4462df1aff47ae393a0"  # #9: $287K verified PnL
-        - "0x1b4d7cbd8dce8a56dd2c51e952cccbf55f78e246"  # #10: $215K verified PnL
-      lookback_minutes: 1440
-      # Require at least 2 wallets (adjust to 2 once you see signals)
->>>>>>> main
-      min_wallet_buys: 2
-      # Minimum sum of wallet scores across buyers (confluence gate).
-      min_confluence_weight: 1.5
-      # Don't chase outcomes priced above 0.75 — edge disappears at high prices.
-      max_entry_price: 0.75
-      # Base size; scales proportionally with confluence weight up to max_weight_cap.
-      size_usdc: 10
-      max_weight_cap: 5.0
-      # Skip entry if current ask is >10% above whale's avg fill price.
-      max_price_slippage_pct: 0.10
-      # Minimum minutes between signals on the same market.
-      cooldown_minutes: 15

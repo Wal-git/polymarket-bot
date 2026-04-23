@@ -16,6 +16,8 @@ dependencies = [
     "typer>=0.12",
     "httpx>=0.27",
     "requests>=2.31",
+    "aiohttp>=3.9",
+    "websockets>=12.0",
 ]
 
 [project.optional-dependencies]
@@ -24,9 +26,24 @@ dashboard = [
     "streamlit-autorefresh>=1.0",
     "pandas>=2.0",
 ]
+llm = [
+    "langchain>=0.2",
+    "openai>=1.37",
+    "chromadb>=0.5",
+    "tavily-python>=0.3",
+    "newsapi-python>=0.2",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+]
 
 [project.scripts]
 polybot = "polybot.main:app"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
