@@ -25,6 +25,17 @@ strategies:
     module: strategies.smart_money
     enabled: true
     config:
+<<<<<<< feat/smart-money-trailing-improvements
+      # YAML wallets are the fallback if smart_wallets_signal.json doesn't exist yet.
+      wallets:
+        - "0x9d84ce0306f8551e02efef1680475fc0f1dc1344"  # domah
+        - "0x3cf3e8d5427aed066a7a5926980600f6c3cf87b3"  # 50pence
+        - "0x6356fb47642a028bc09df92023c35a21a0b41885"  # fhantom
+        - "0x7c3db723f1d4d8cb9c550095203b686cb11e5c6b"  # car
+        - "0x56687bf447db6ffa42ffe2204a05edaa20f55839"  # theo4
+      lookback_minutes: 60
+      # Require at least 2 distinct wallets to buy the same outcome.
+=======
       # Top 10 verified performers from monthly leaderboard (30d lookback)
       wallets:
         - "0xead152b855effa6b5b5837f53b24c0756830c76a"  # #1: $13.0M verified PnL
@@ -39,6 +50,7 @@ strategies:
         - "0x1b4d7cbd8dce8a56dd2c51e952cccbf55f78e246"  # #10: $215K verified PnL
       lookback_minutes: 1440
       # Require at least 2 wallets (adjust to 2 once you see signals)
+>>>>>>> main
       min_wallet_buys: 2
       # Minimum sum of wallet scores across buyers (confluence gate).
       min_confluence_weight: 1.5

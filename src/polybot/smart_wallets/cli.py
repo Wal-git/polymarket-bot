@@ -89,6 +89,8 @@ def _cmd_backtest(args: list[str]) -> None:
     print(json.dumps(result.to_dict(), indent=2))
 
 
+<<<<<<< feat/smart-money-trailing-improvements
+=======
 def _cmd_leaderboard(args: list[str]) -> None:
     from polybot.smart_wallets.monthly import run
 
@@ -119,6 +121,7 @@ def _cmd_leaderboard(args: list[str]) -> None:
         )
 
 
+>>>>>>> main
 def _cmd_trail_backtest(args: list[str]) -> None:
     from polybot.smart_wallets.trail_backtest import run_trail_backtest
 
@@ -156,10 +159,15 @@ def main(argv: list[str] | None = None) -> None:
         _cmd_backtest(rest)
     elif cmd == "trail-backtest":
         _cmd_trail_backtest(rest)
+<<<<<<< feat/smart-money-trailing-improvements
+    else:
+        print(f"Unknown command: {cmd}. Use 'run', 'status', 'backtest', or 'trail-backtest'.")
+=======
     elif cmd == "leaderboard":
         _cmd_leaderboard(rest)
     else:
         print(f"Unknown command: {cmd}. Use 'run', 'status', 'backtest', 'trail-backtest', or 'leaderboard'.")
+>>>>>>> main
         sys.exit(1)
 
 

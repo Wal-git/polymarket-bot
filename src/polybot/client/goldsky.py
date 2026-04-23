@@ -236,16 +236,40 @@ class GoldskyClient:
         since_ts: int,
         until_ts: int | None = None,
         exclude_platform_wallets: bool = True,
+<<<<<<< feat/smart-money-trailing-improvements
+    ) -> list[OrderFilledEvent]:
+        """Fetch events where any of ``wallets`` is taker or maker.
+
+        Issues two paginated queries (taker_in and maker_in) and merges
+        results, deduplicating by transaction hash.
+=======
         batch_size: int = 10,
     ) -> list[OrderFilledEvent]:
         """Fetch events where any of ``wallets`` is taker or maker.
 
         Batches wallets into groups to avoid query timeouts, issues paginated
         queries for each batch, and merges results with deduplication.
+>>>>>>> main
         """
         if not wallets:
             return []
         until_ts = until_ts or int(time.time())
+<<<<<<< feat/smart-money-trailing-improvements
+        addr_list = '["' + '", "'.join(w.lower() for w in wallets) + '"]'
+
+        seen: set[str] = set()
+        all_events: list[OrderFilledEvent] = []
+        for field in ("taker_in", "maker_in"):
+            for ev in self.fetch_events_since(
+                since_ts,
+                until_ts=until_ts,
+                exclude_platform_wallets=exclude_platform_wallets,
+                extra_where=f"{field}: {addr_list}",
+            ):
+                if ev.transaction_hash not in seen:
+                    seen.add(ev.transaction_hash)
+                    all_events.append(ev)
+=======
 
         seen: set[str] = set()
         all_events: list[OrderFilledEvent] = []
@@ -265,6 +289,7 @@ class GoldskyClient:
                     if ev.transaction_hash not in seen:
                         seen.add(ev.transaction_hash)
                         all_events.append(ev)
+>>>>>>> main
 
         return sorted(all_events, key=lambda e: (e.timestamp, e.transaction_hash))
 
