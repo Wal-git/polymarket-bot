@@ -6,7 +6,7 @@ from typing import Optional
 
 import structlog
 
-from polybot.account.balance import get_usdc_balance
+from polybot.account.balance import get_usdc_balance, invalidate_cache
 from polybot.client.clob import CLOBClient
 from polybot.execution.entry import execute_entry
 from polybot.execution.exit import monitor_position
@@ -144,6 +144,22 @@ class MarketLifecycle:
             size_usdc=round(signal.size_usdc, 2),
         )
 
+        # Re-fetch live balance immediately before placing order
+        invalidate_cache()
+        live_balance = float(get_usdc_balance(self._clob))
+        min_usdc = float(
+            self._config.get("strategy", {}).get("sizing", {}).get("min_trade_usdc", 20.0)
+        )
+        if live_balance < min_usdc:
+            logger.warning(
+                "insufficient_balance",
+                slug=self.slot.slug,
+                balance=round(live_balance, 2),
+                required=min_usdc,
+            )
+            self._state = LifecycleState.RESOLVED
+            return
+
         order_id = await execute_entry(
             signal=signal,
             slot=self.slot,
@@ -188,5 +204,10 @@ class MarketLifecycle:
                 reason=result.reason.value,
                 pnl=pnl_str,
             )
+        else:
+            # Market resolved — tell CLOB to sync on-chain balance so winnings
+            # are visible before the next slot tries to size a trade
+            self._clob.sync_balance_allowance()
+            invalidate_cache()
 
         self._state = LifecycleState.RESOLVED

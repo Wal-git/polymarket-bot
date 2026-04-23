@@ -109,3 +109,13 @@ class CLOBClient:
         except Exception:
             logger.warning("balance_fetch_failed")
             return Decimal("0")
+
+    def sync_balance_allowance(self) -> None:
+        """Tell the CLOB to re-read on-chain balance/allowance. Call after resolution."""
+        try:
+            from py_clob_client.clob_types import AssetType, BalanceAllowanceParams
+            params = BalanceAllowanceParams(asset_type=AssetType.COLLATERAL)
+            self.client.update_balance_allowance(params=params)
+            logger.info("balance_allowance_synced")
+        except Exception as e:
+            logger.warning("balance_allowance_sync_failed", error=str(e))
