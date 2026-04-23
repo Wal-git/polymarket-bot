@@ -35,7 +35,7 @@ strategy:
   sizing:
     mode: kelly
     kelly_fraction: 0.25            # quarter-Kelly safety cap
-    min_trade_usdc: 10
+    min_trade_usdc: 20
     max_trade_usdc: 200
 
   bankroll:

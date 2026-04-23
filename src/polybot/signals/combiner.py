@@ -46,6 +46,12 @@ def should_trade(
         coinbase_delta=coinbase_delta,
     )
 
+    # Always capture orderbook state for diagnostics
+    history = book_ws.get_imbalance_history()
+    window_readings = [r for r in history if window[0] <= r.seconds_since_open <= window[1]]
+    window_ratio = round(max((r.ratio for r in window_readings), default=0.0), 3) if window_readings else None
+    latest_ratio = round(history[-1].ratio, 3) if history else None
+
     # Signal 1: price divergence
     div_direction = detect_divergence(prices, slot.price_to_beat, min_gap_usd=min_gap)
     if div_direction is None:
@@ -54,7 +60,10 @@ def should_trade(
             **_base,
             div_direction=None,
             imb_direction=None,
-            imbalance_ratio=None,
+            imbalance_ratio=window_ratio,
+            latest_imbalance_ratio=latest_ratio,
+            imbalance_readings=len(history),
+            window_readings=len(window_readings),
             confluence=False,
             confidence=None,
             size_usdc=None,
@@ -62,11 +71,6 @@ def should_trade(
             reject_reason="no_divergence",
         )
         return None
-
-    # Signal 2: order-book imbalance in smart-money window
-    history = book_ws.get_imbalance_history()
-    window_readings = [r for r in history if window[0] <= r.seconds_since_open <= window[1]]
-    window_ratio = round(max((r.ratio for r in window_readings), default=0.0), 3) if window_readings else None
 
     imb_direction = detect_smart_entry(history, threshold_buy, threshold_sell, window)
     if imb_direction is None or imb_direction != div_direction:
@@ -82,6 +86,9 @@ def should_trade(
             div_direction=div_direction.value,
             imb_direction=imb_direction.value if imb_direction else None,
             imbalance_ratio=window_ratio,
+            latest_imbalance_ratio=latest_ratio,
+            imbalance_readings=len(history),
+            window_readings=len(window_readings),
             confluence=False,
             confidence=None,
             size_usdc=None,
@@ -121,6 +128,9 @@ def should_trade(
         div_direction=div_direction.value,
         imb_direction=div_direction.value,
         imbalance_ratio=round(imbalance, 3),
+        latest_imbalance_ratio=latest_ratio,
+        imbalance_readings=len(history),
+        window_readings=len(window_readings),
         confluence=True,
         confidence=round(confidence, 3),
         size_usdc=round(size, 2),
