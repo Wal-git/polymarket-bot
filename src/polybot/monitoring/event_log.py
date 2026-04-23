@@ -49,6 +49,7 @@ class EventLog:
 
 
 _DEFAULT_EVALS = Path("./data/evaluations.jsonl")
+_DEFAULT_RESULTS = Path("./data/results.jsonl")
 
 
 def emit_evaluation(**fields: Any) -> None:
@@ -56,4 +57,12 @@ def emit_evaluation(**fields: Any) -> None:
     _DEFAULT_EVALS.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps({"ts": _now_iso(), **fields}, default=_json_default)
     with _DEFAULT_EVALS.open("a", encoding="utf-8") as f:
+        f.write(line + "\n")
+
+
+def emit_result(**fields: Any) -> None:
+    """Write a resolved trade outcome to ./data/results.jsonl."""
+    _DEFAULT_RESULTS.parent.mkdir(parents=True, exist_ok=True)
+    line = json.dumps({"ts": _now_iso(), **fields}, default=_json_default)
+    with _DEFAULT_RESULTS.open("a", encoding="utf-8") as f:
         f.write(line + "\n")

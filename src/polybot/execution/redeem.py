@@ -40,14 +40,42 @@ def _fetch_redeemable(address: str) -> list[dict]:
             f"{_DATA_API}/positions?user={address}&sizeThreshold=0",
             timeout=10,
         )
-        return [p for p in r.json() if p.get("redeemable") and p.get("curPrice", 0) == 1]
+        return [p for p in r.json() if p.get("redeemable")]
     except Exception as e:
         logger.warning("redeem_fetch_failed", error=str(e))
         return []
 
 
-def redeem_resolved_positions(private_key: str, clob_client) -> int:
-    """Redeem all winning positions on-chain, then sync CLOB. Returns count redeemed."""
+def fetch_outcomes(address: str, slugs: list[str]) -> list[dict]:
+    """Return win/loss outcome records for a list of slugs."""
+    try:
+        r = httpx.get(
+            f"{_DATA_API}/positions?user={address}&sizeThreshold=0",
+            timeout=10,
+        )
+        positions = r.json()
+        slug_set = set(slugs)
+        results = []
+        for p in positions:
+            if p.get("eventSlug") in slug_set:
+                won = p.get("curPrice", 0) == 1
+                pnl = round(float(p.get("cashPnl", 0)), 4)
+                results.append({
+                    "slug": p["eventSlug"],
+                    "won": won,
+                    "pnl": pnl,
+                    "shares": float(p.get("size", 0)),
+                    "entry_price": float(p.get("avgPrice", 0)),
+                    "payout": round(float(p.get("size", 0)) if won else 0.0, 4),
+                })
+        return results
+    except Exception as e:
+        logger.warning("fetch_outcomes_failed", error=str(e))
+        return []
+
+
+def redeem_resolved_positions(private_key: str, clob_client) -> tuple[int, list[dict]]:
+    """Redeem winning positions on-chain, sync CLOB. Returns (count, outcome_list)."""
     w3 = Web3(Web3.HTTPProvider(_POLYGON_RPC))
     account = w3.eth.account.from_key(private_key)
     address = account.address
@@ -55,11 +83,23 @@ def redeem_resolved_positions(private_key: str, clob_client) -> int:
     collateral = clob_client.get_collateral_address()
     ctf = w3.eth.contract(address=_CTF_ADDRESS, abi=_CTF_ABI)
 
-    positions = _fetch_redeemable(address)
-    if not positions:
+    all_positions = _fetch_redeemable(address)
+    if not all_positions:
         logger.info("no_redeemable_positions")
-        return 0
+        return 0, []
 
+    outcomes = []
+    for pos in all_positions:
+        won = pos.get("curPrice", 0) == 1
+        outcomes.append({
+            "slug": pos.get("eventSlug", ""),
+            "won": won,
+            "pnl": round(float(pos.get("cashPnl", 0)), 4),
+            "shares": float(pos.get("size", 0)),
+            "entry_price": float(pos.get("avgPrice", 0)),
+        })
+
+    positions = [p for p in all_positions if p.get("curPrice", 0) == 1]
     redeemed = 0
     for pos in positions:
         condition_id = pos["conditionId"]
@@ -105,7 +145,6 @@ def redeem_resolved_positions(private_key: str, clob_client) -> int:
             logger.error("redeem_error", condition_id=condition_id, error=str(e))
 
     if redeemed > 0:
-        # Sync CLOB so it sees the recovered USDC
         try:
             from py_clob_client.clob_types import AssetType, BalanceAllowanceParams
             params = BalanceAllowanceParams(asset_type=AssetType.COLLATERAL)
@@ -114,13 +153,13 @@ def redeem_resolved_positions(private_key: str, clob_client) -> int:
         except Exception as e:
             logger.warning("clob_sync_failed", error=str(e))
 
-    return redeemed
+    return redeemed, outcomes
 
 
-def maybe_redeem(private_key: str, clob_client) -> Optional[int]:
+def maybe_redeem(private_key: str, clob_client) -> tuple[int, list[dict]]:
     """Non-blocking wrapper — swallows errors so it never breaks lifecycle."""
     try:
         return redeem_resolved_positions(private_key, clob_client)
     except Exception as e:
         logger.warning("redeem_skipped", error=str(e))
-        return None
+        return 0, []

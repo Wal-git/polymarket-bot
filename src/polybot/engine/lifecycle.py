@@ -208,11 +208,31 @@ class MarketLifecycle:
             # Market resolved — redeem winning CTF tokens on-chain then sync CLOB
             from polybot.execution.redeem import maybe_redeem
             from polybot.auth.wallet import get_private_key
-            maybe_redeem(get_private_key(), self._clob.client)
+            from polybot.monitoring.event_log import emit_result
+            _, outcomes = maybe_redeem(get_private_key(), self._clob.client)
             self._clob.sync_balance_allowance()
             invalidate_cache()
             # Remove from tracker — position settled on-chain, no sell order needed
             self._tracker.close_position(token_id)
             self._tracker.save()
+            # Record outcome for dashboard
+            for outcome in outcomes:
+                if outcome.get("slug") == self.slot.slug:
+                    self.pnl = outcome["pnl"]
+                    emit_result(
+                        slug=self.slot.slug,
+                        won=outcome["won"],
+                        pnl=outcome["pnl"],
+                        shares=outcome["shares"],
+                        entry_price=outcome["entry_price"],
+                        direction=signal.direction.value,
+                    )
+                    logger.info(
+                        "trade_resolved",
+                        slug=self.slot.slug,
+                        won=outcome["won"],
+                        pnl=f"{'+' if outcome['pnl'] >= 0 else ''}{outcome['pnl']:.2f}",
+                    )
+                    break
 
         self._state = LifecycleState.RESOLVED

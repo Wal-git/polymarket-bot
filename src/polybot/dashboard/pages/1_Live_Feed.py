@@ -6,7 +6,7 @@ from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="Live Feed — POLYBOT", page_icon="◇", layout="wide")
 
-from polybot.dashboard.data_loader import inject_styles, load_evaluations, render_sidebar  # noqa: E402
+from polybot.dashboard.data_loader import inject_styles, load_evaluations, load_results, render_sidebar  # noqa: E402
 
 inject_styles()
 st_autorefresh(interval=5_000, key="live_feed_refresh")
@@ -15,7 +15,7 @@ render_sidebar()
 st.markdown('<div class="page-header">◇ LIVE SIGNAL FEED</div>', unsafe_allow_html=True)
 
 
-def _render_eval_card(ev: dict) -> None:
+def _render_eval_card(ev: dict, result: dict | None = None) -> None:
     is_conf = ev.get("confluence", False)
     reject = ev.get("reject_reason") or ""
     border = "#0ECB81" if is_conf else ("#F0B90B" if reject == "direction_mismatch" else "#F6465D")
@@ -47,11 +47,23 @@ def _render_eval_card(ev: dict) -> None:
     trade_line = ""
     if is_conf and confidence is not None:
         dir_color = "#0ECB81" if direction == "UP" else "#F6465D"
+        outcome_html = ""
+        if result is not None:
+            won = result.get("won", False)
+            pnl = result.get("pnl", 0)
+            outcome_color = "#0ECB81" if won else "#F6465D"
+            outcome_label = "WIN" if won else "LOSS"
+            pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
+            outcome_html = (
+                f'&nbsp;·&nbsp; <span style="color:{outcome_color};font-weight:700;">'
+                f'{outcome_label} {pnl_str}</span>'
+            )
         trade_line = f"""
         <div style="margin-top:0.5rem;padding:0.4rem 0.6rem;background:rgba(14,203,129,0.06);border-radius:3px;font-family:'Inter',sans-serif;font-size:0.82rem;">
             <span style="color:{dir_color};font-weight:700;">▲ {direction}</span>
             &nbsp;·&nbsp; <span style="color:#F0B90B;font-weight:600;">${size_usdc:.2f}</span> USDC
             &nbsp;·&nbsp; confidence <span style="color:#0ECB81;font-weight:600;">{confidence:.1%}</span>
+            {outcome_html}
         </div>"""
 
     st.markdown(f"""
@@ -111,5 +123,7 @@ st.caption(f"{len(evals)} evaluation(s) · auto-refreshes every 5s")
 if not evals:
     st.info("No evaluations yet — bot will log signal decisions here as each 5-min slot is evaluated.")
 else:
+    results = load_results()
     for ev in evals:
-        _render_eval_card(ev)
+        slug = ev.get("slug", "")
+        _render_eval_card(ev, result=results.get(slug))

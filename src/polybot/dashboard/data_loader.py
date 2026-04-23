@@ -19,6 +19,7 @@ _STATE_FILE = Path("data/state.json")
 _CYCLES_FILE = Path("data/cycles.jsonl")
 _SIGNALS_FILE = Path("data/signals.jsonl")
 _EVALS_FILE = Path("data/evaluations.jsonl")
+_RESULTS_FILE = Path("data/results.jsonl")
 _BOT_LOG_FILE = Path("data/bot.log")
 _BALANCE_FILE = Path("data/balance.json")
 _CONFIG_FILE = Path("config/default.yaml")
@@ -53,6 +54,13 @@ def load_balance() -> dict[str, Any]:
 @st.cache_data(ttl=5)
 def load_evaluations(last_n: int = 200) -> list[dict]:
     return _tail_jsonl(_EVALS_FILE, last_n)
+
+
+@st.cache_data(ttl=5)
+def load_results() -> dict[str, dict]:
+    """Return results keyed by slug for O(1) lookup in card rendering."""
+    records = _tail_jsonl(_RESULTS_FILE, 500)
+    return {r["slug"]: r for r in records if "slug" in r}
 
 
 @st.cache_data(ttl=5)
