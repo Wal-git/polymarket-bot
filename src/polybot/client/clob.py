@@ -73,19 +73,22 @@ class CLOBClient:
             )
             return None
 
+        from py_clob_client.clob_types import OrderArgs
         from py_clob_client.order_builder.constants import BUY as CLOB_BUY, SELL as CLOB_SELL
 
         side = CLOB_BUY if order.side == Side.BUY else CLOB_SELL
 
-        signed_order = self.client.create_and_post_order(
-            {
-                "tokenID": order.token_id,
-                "price": float(order.limit_price or 0),
-                "size": float(order.size),
-                "side": side,
-            }
+        order_args = OrderArgs(
+            token_id=str(order.token_id),
+            price=float(order.limit_price or 0),
+            size=float(order.size),
+            side=side,
         )
-        order_id = signed_order.get("orderID", signed_order.get("id", "unknown"))
+        resp = self.client.create_and_post_order(order_args)
+        if isinstance(resp, dict):
+            order_id = resp.get("orderID") or resp.get("id") or "unknown"
+        else:
+            order_id = getattr(resp, "orderID", None) or getattr(resp, "id", "unknown")
         logger.info("order_placed", order_id=order_id, token_id=order.token_id)
         return order_id
 
