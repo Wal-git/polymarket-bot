@@ -138,13 +138,6 @@ class MarketLifecycle:
             return
 
         signal_ts = time.time()
-        logger.info(
-            "signal_fired",
-            slug=self.slot.slug,
-            direction=signal.direction.value,
-            confidence=signal.confidence,
-            size_usdc=round(signal.size_usdc, 2),
-        )
 
         # Re-fetch live balance immediately before placing order
         invalidate_cache()
