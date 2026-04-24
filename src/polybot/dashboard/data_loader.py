@@ -24,6 +24,8 @@ _BOT_LOG_FILE = Path("data/bot.log")
 _BALANCE_FILE = Path("data/balance.json")
 _CONFIG_FILE = Path("config/default.yaml")
 
+STARTING_BALANCE = 180.0
+
 
 @st.cache_data(ttl=5)
 def load_state() -> dict[str, Any]:
@@ -61,6 +63,27 @@ def load_results() -> dict[str, dict]:
     """Return results keyed by slug for O(1) lookup in card rendering."""
     records = _tail_jsonl(_RESULTS_FILE, 500)
     return {r["slug"]: r for r in records if "slug" in r}
+
+
+@st.cache_data(ttl=30)
+def load_results_deduped() -> list[dict]:
+    """All resolved trade results, deduplicated by slug (latest per slug), sorted by ts."""
+    try:
+        lines = _RESULTS_FILE.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return []
+    seen: dict[str, dict] = {}
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            r = json.loads(line)
+            if "slug" in r:
+                seen[r["slug"]] = r
+        except json.JSONDecodeError:
+            continue
+    return sorted(seen.values(), key=lambda r: r.get("ts", ""))
 
 
 @st.cache_data(ttl=5)
@@ -289,11 +312,11 @@ def render_sidebar() -> None:
 
         positions = state.get("positions", [])
         trades = state.get("trades", [])
-        realized = sum(float(p.get("realized_pnl") or 0) for p in positions)
-        unrealized = sum(float(p.get("unrealized_pnl") or 0) for p in positions)
-        total_pnl = realized + unrealized
+        total_value = float(bal.get("total_value", 0)) if bal else 0.0
+        total_pnl = (total_value - STARTING_BALANCE) if (bal and total_value > 0) else 0.0
         pnl_color = "#0ECB81" if total_pnl >= 0 else "#F6465D"
         pnl_str = f"+${total_pnl:,.2f}" if total_pnl >= 0 else f"-${abs(total_pnl):,.2f}"
+        pnl_pct = total_pnl / STARTING_BALANCE * 100
 
         st.markdown(f"""
 <div style="margin:0.5rem 0 0.25rem 0;">
@@ -303,6 +326,8 @@ def render_sidebar() -> None:
   <div style="font-family:'Barlow Condensed',sans-serif;font-size:1.6rem;
               font-weight:700;color:{pnl_color};font-variant-numeric:tabular-nums;line-height:1;">
     {pnl_str}</div>
+  <div style="font-family:'Inter',sans-serif;font-size:0.72rem;color:{pnl_color};margin-top:0.1rem;">
+    {pnl_pct:+.1f}%</div>
 </div>""", unsafe_allow_html=True)
 
         if bal:
