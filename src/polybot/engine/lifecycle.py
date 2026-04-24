@@ -217,6 +217,17 @@ class MarketLifecycle:
                 reason=result.reason.value,
                 pnl=pnl_str,
             )
+            from polybot.monitoring.event_log import emit_result
+            emit_result(
+                slug=self.slot.slug,
+                exit_reason=result.reason.value,
+                exit_price=result.exit_price,
+                pnl=result.pnl,
+                won=(result.pnl or 0) > 0,
+                direction=signal.direction.value,
+                confidence=signal.confidence,
+                hold_duration_s=round(time.time() - signal_ts, 1),
+            )
         else:
             # Market resolved — redeem winning CTF tokens on-chain then sync CLOB
             from polybot.execution.redeem import maybe_redeem
@@ -239,6 +250,10 @@ class MarketLifecycle:
                         shares=outcome["shares"],
                         entry_price=outcome["entry_price"],
                         direction=signal.direction.value,
+                        exit_reason="HOLD_TO_RESOLUTION",
+                        exit_price=1.0 if outcome["won"] else 0.0,
+                        confidence=signal.confidence,
+                        hold_duration_s=round(time.time() - signal_ts, 1),
                     )
                     logger.info(
                         "trade_resolved",

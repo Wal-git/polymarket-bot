@@ -33,14 +33,14 @@ async def monitor_position(
 
         if current_bid is not None:
             if current_bid >= profit_target:
-                pnl = await _sell(token_id, current_bid, slot, clob, tracker, dry_run)
+                pnl, exit_price = await _sell(token_id, current_bid, slot, clob, tracker, dry_run)
                 logger.info("exit_profit", slug=slot.slug, bid=current_bid, pnl=pnl)
-                return ExitResult(reason=ExitReason.PROFIT_TARGET, pnl=pnl)
+                return ExitResult(reason=ExitReason.PROFIT_TARGET, pnl=pnl, exit_price=exit_price)
 
             if current_bid <= stop_loss:
-                pnl = await _sell(token_id, current_bid, slot, clob, tracker, dry_run)
+                pnl, exit_price = await _sell(token_id, current_bid, slot, clob, tracker, dry_run)
                 logger.info("exit_stop_loss", slug=slot.slug, bid=current_bid, pnl=pnl)
-                return ExitResult(reason=ExitReason.STOP_LOSS, pnl=pnl)
+                return ExitResult(reason=ExitReason.STOP_LOSS, pnl=pnl, exit_price=exit_price)
 
         if time_remaining < hold_to_resolution_secs:
             logger.info(
@@ -60,10 +60,10 @@ async def _sell(
     clob: CLOBClient,
     tracker: PositionTracker,
     dry_run: bool,
-) -> Optional[float]:
+) -> tuple[Optional[float], float]:
     pos = tracker._positions.get(token_id)
     if pos is None:
-        return None
+        return None, bid_price
 
     limit_price = Decimal(str(round(bid_price, 2)))
     sell_order = OrderRequest(
@@ -82,4 +82,4 @@ async def _sell(
         price=limit_price,
         market_question=slot.slug,
     )
-    return round(pnl, 4)
+    return round(pnl, 4), float(limit_price)

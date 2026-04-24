@@ -14,12 +14,13 @@ strategy:
 
   signals:
     divergence:
-      min_gap_usd: 50.0             # Both Binance & Coinbase must be this far past price_to_beat
+      min_gap_usd: 75.0             # Both Binance & Coinbase must be this far past price_to_beat
+      fast_pass_usd: 150.0          # Either exchange this far past price_to_beat → skip min_gap check
       require_chainlink_gap: true
     imbalance:
-      buy_threshold: 1.8            # bid/ask ratio >= this → bullish
-      sell_threshold: 0.55          # bid/ask ratio <= this → bearish
-      detection_window_seconds: [30, 90]   # smart-money entry window
+      buy_threshold: 1.8            # retained for data capture only — not used as a trade gate
+      sell_threshold: 0.55
+      detection_window_seconds: [30, 90]
       depth_levels: 10
 
   entry:
@@ -37,6 +38,7 @@ strategy:
     kelly_fraction: 0.25            # quarter-Kelly safety cap
     min_trade_usdc: 20
     max_trade_usdc: 200
+    min_confidence: 0.80            # reject trades below this confidence
 
   bankroll:
     source: wallet_balance          # live USDC balance; alternative: "fixed"

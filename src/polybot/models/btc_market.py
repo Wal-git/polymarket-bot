@@ -65,3 +65,4 @@ class SlotInfo:
 class ExitResult:
     reason: ExitReason
     pnl: Optional[float]  # None when HOLD_TO_RESOLUTION (pending resolution)
+    exit_price: Optional[float] = None

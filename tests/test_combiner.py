@@ -49,7 +49,7 @@ def _mock_book_ws(best_ask: float = 0.52, imbalance_ratio: float = 2.0, secs: fl
 
 _DEFAULT_CONFIG = {
     "signals": {
-        "divergence": {"min_gap_usd": 50.0},
+        "divergence": {"min_gap_usd": 75.0, "fast_pass_usd": 200.0},
         "imbalance": {
             "buy_threshold": 1.8,
             "sell_threshold": 0.55,
@@ -62,8 +62,8 @@ _DEFAULT_CONFIG = {
 
 
 class TestShouldTrade:
-    def test_both_signals_agree_returns_signal(self):
-        prices = _prices(95_100, 95_080)
+    def test_divergence_fires_signal(self):
+        prices = _prices(95_100, 95_080)  # both > $75 gap
         ws = _mock_book_ws(imbalance_ratio=2.0, secs=60.0)
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=_DEFAULT_CONFIG)
         assert isinstance(result, TradeSignal)
@@ -72,34 +72,46 @@ class TestShouldTrade:
         assert result.size_usdc >= 10.0
 
     def test_no_divergence_returns_none(self):
-        prices = _prices(95_020, 95_010)  # only $20 gap, below threshold
+        prices = _prices(95_020, 95_010)  # only $20 gap, below $75 threshold
         ws = _mock_book_ws(imbalance_ratio=2.0, secs=60.0)
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=_DEFAULT_CONFIG)
         assert result is None
 
-    def test_no_imbalance_returns_none(self):
-        prices = _prices(95_100, 95_080)  # valid divergence UP
-        ws = _mock_book_ws(imbalance_ratio=1.2, secs=60.0)  # below 1.8 threshold
+    def test_divergence_fires_regardless_of_imbalance(self):
+        # Imbalance is no longer a gate — low imbalance should still fire
+        prices = _prices(95_100, 95_080)
+        ws = _mock_book_ws(imbalance_ratio=1.2, secs=60.0)
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=_DEFAULT_CONFIG)
-        assert result is None
+        assert isinstance(result, TradeSignal)
+        assert result.direction == Direction.UP
 
-    def test_signals_disagree_returns_none(self):
-        prices = _prices(95_100, 95_080)  # divergence says UP
-        ws = _mock_book_ws(imbalance_ratio=0.4, secs=60.0)  # imbalance says DOWN
+    def test_divergence_fires_regardless_of_imbalance_window(self):
+        # Imbalance window timing no longer blocks the trade
+        prices = _prices(95_100, 95_080)
+        ws = _mock_book_ws(imbalance_ratio=2.5, secs=15.0)  # outside 30-90s window
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=_DEFAULT_CONFIG)
-        assert result is None
+        assert isinstance(result, TradeSignal)
 
     def test_down_direction(self):
-        prices = _prices(94_900, 94_920)  # both below price_to_beat by >$50
+        prices = _prices(94_920, 94_900)  # both below price_to_beat by >$75
         ws = _mock_book_ws(imbalance_ratio=0.4, secs=60.0, best_ask=0.52)
         ws.best_ask.return_value = 0.52
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=_DEFAULT_CONFIG)
         assert result is not None
         assert result.direction == Direction.DOWN
 
-    def test_imbalance_outside_window_returns_none(self):
-        prices = _prices(95_100, 95_080)
-        ws = _mock_book_ws(imbalance_ratio=2.5, secs=15.0)  # too early (< 30s)
+    def test_fast_pass_one_exchange_large(self):
+        # Only Binance has $200+ gap; Coinbase has a small gap but same direction
+        prices = _prices(95_250, 95_030)  # binance +250, coinbase +30
+        ws = _mock_book_ws(imbalance_ratio=1.0, secs=60.0)
+        result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=_DEFAULT_CONFIG)
+        assert isinstance(result, TradeSignal)
+        assert result.direction == Direction.UP
+
+    def test_fast_pass_blocked_when_exchanges_disagree(self):
+        # One exchange > $200 but other is in the opposite direction — no trade
+        prices = _prices(95_250, 94_980)  # binance +250, coinbase -20
+        ws = _mock_book_ws(imbalance_ratio=1.0, secs=60.0)
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=_DEFAULT_CONFIG)
         assert result is None
 

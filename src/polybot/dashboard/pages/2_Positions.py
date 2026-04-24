@@ -65,6 +65,8 @@ else:
 
         pnl_str = f"+${pnl:.2f}" if pnl is not None and pnl >= 0 else (f"-${abs(pnl):.2f}" if pnl is not None else "—")
 
+        confidence = result.get("confidence") if result else None
+
         rows.append({
             "Time (PDT)": _to_pdt(t.get("timestamp", "")),
             "Market": slug.replace("btc-updown-5m-", ""),
@@ -72,6 +74,7 @@ else:
             "Shares": f"{float(t.get('size') or 0):.2f}",
             "Entry": f"${float(t.get('price') or 0):.2f}",
             "Stake": f"${float(t.get('size') or 0) * float(t.get('price') or 0):.2f}",
+            "Confidence": f"{confidence:.1%}" if confidence is not None else "—",
             "Outcome": outcome,
             "P&L": pnl_str,
         })

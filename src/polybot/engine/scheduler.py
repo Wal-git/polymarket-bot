@@ -5,13 +5,18 @@ from pathlib import Path
 import structlog
 from rich.console import Console
 
+from polybot.account.balance import invalidate_cache
+from polybot.auth.wallet import get_private_key
 from polybot.client.clob import CLOBClient
 from polybot.engine.discovery import fetch_slot_details, get_slug, get_slot_ts
 from polybot.engine.lifecycle import LifecycleState, MarketLifecycle
+from polybot.execution.redeem import maybe_redeem
 from polybot.monitoring.tracker import PositionTracker
 
 logger = structlog.get_logger()
 console = Console()
+
+_REDEEM_INTERVAL_SECS = 1800  # re-scan for redeemable positions every 30 minutes
 
 
 class BtcEngine:
@@ -40,10 +45,20 @@ class BtcEngine:
         self._trades_today = 0
         self._running = False
 
+    def _run_redeem(self) -> None:
+        """Redeem any resolved positions and sync CLOB balance."""
+        count, _ = maybe_redeem(get_private_key(), self._clob.client)
+        if count:
+            self._clob.sync_balance_allowance()
+            invalidate_cache()
+
     async def run(self) -> None:
         self._running = True
         mode = "DRY RUN" if self._dry_run else "LIVE"
         console.print(f"\n[bold green]BTC 5-min engine started[/] — mode: [bold]{mode}[/]")
+
+        # Redeem any positions left over from previous runs
+        self._run_redeem()
 
         loop = asyncio.get_running_loop()
         import signal as _signal
@@ -55,6 +70,7 @@ class BtcEngine:
 
         active: dict[str, MarketLifecycle] = {}
         attempted: set[str] = set()  # slugs already tried this run
+        last_redeem_ts = time.time()
 
         while self._running:
             if self._halt_file.exists():
@@ -123,6 +139,11 @@ class BtcEngine:
                     active[next_slug] = lc
                     attempted.add(next_slug)
                     lc.start()
+
+            # Periodic redemption scan for positions resolved outside normal lifecycle
+            if time.time() - last_redeem_ts >= _REDEEM_INTERVAL_SECS:
+                self._run_redeem()
+                last_redeem_ts = time.time()
 
             await asyncio.sleep(1)
 
