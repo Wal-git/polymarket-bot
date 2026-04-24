@@ -50,6 +50,7 @@ class PositionTracker:
         market_question: str,
         outcome_label: str = "",
         timestamp: str = "",
+        confidence: float | None = None,
     ):
         from datetime import datetime, timezone
 
@@ -84,6 +85,7 @@ class PositionTracker:
                     outcome_label=outcome_label,
                     shares=size,
                     avg_entry_price=price,
+                    confidence=confidence,
                 )
         elif side == Side.SELL:
             if token_id in self._positions:

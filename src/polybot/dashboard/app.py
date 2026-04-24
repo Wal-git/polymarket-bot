@@ -210,11 +210,13 @@ if positions:
         shares = float(p.get("shares") or 0)
         entry = float(p.get("avg_entry_price") or 0)
         unrealized = float(p.get("unrealized_pnl") or 0)
+        conf = p.get("confidence")
         rows.append({
             "Market": (p.get("market_question") or "")[:50],
             "Direction": p.get("outcome_label") or "",
             "Shares": f"{shares:.4f}",
             "Entry": f"${entry:.4f}",
             "Unrealized P&L": f"${unrealized:+,.2f}",
+            "Confidence": f"{conf:.1%}" if conf is not None else "—",
         })
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)

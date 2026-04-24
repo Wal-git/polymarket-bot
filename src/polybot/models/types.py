@@ -61,6 +61,7 @@ class Position(BaseModel):
     current_price: Decimal = Decimal("0")
     unrealized_pnl: Decimal = Decimal("0")
     realized_pnl: Decimal = Decimal("0")
+    confidence: Optional[float] = None
 
 
 class TradeRecord(BaseModel):

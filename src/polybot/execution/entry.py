@@ -72,6 +72,7 @@ async def execute_entry(
         price=price,
         market_question=slot.slug,
         outcome_label=signal.direction.value,
+        confidence=signal.confidence,
     )
 
     signal_to_fill = round(fill_ts - signal_ts, 3) if signal_ts else None

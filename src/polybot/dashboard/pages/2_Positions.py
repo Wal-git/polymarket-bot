@@ -109,10 +109,12 @@ if positions:
     for p in positions:
         shares = float(p.get("shares") or 0)
         entry = float(p.get("avg_entry_price") or 0)
+        conf = p.get("confidence")
         rows.append({
             "Market": (p.get("market_question") or "")[-10:],
             "Shares": f"{shares:.2f}",
             "Entry": f"${entry:.2f}",
             "Cost Basis": f"${shares * entry:.2f}",
+            "Confidence": f"{conf:.1%}" if conf is not None else "—",
         })
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
