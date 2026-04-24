@@ -3,19 +3,27 @@
 
 cd /root/polymarket-bot
 
-# Start bot if not running
+BOT_PID_FILE="data/bot.pid"
+DASH_PID_FILE="data/dashboard.pid"
+
+is_running() {
+  local pid_file="$1"
+  [ -f "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null
+}
+
 ensure_bot() {
-  if ! pgrep -f '[p]olybot run' > /dev/null; then
+  if ! is_running "$BOT_PID_FILE"; then
     echo "[$(date)] Starting bot..."
-    nohup polybot run > data/bot.log 2>&1 &
+    nohup .venv/bin/polybot run >> data/bot.log 2>&1 &
+    echo $! > "$BOT_PID_FILE"
   fi
 }
 
-# Start dashboard if not running
 ensure_dashboard() {
-  if ! pgrep -f 'streamlit.*app.py' > /dev/null; then
+  if ! is_running "$DASH_PID_FILE"; then
     echo "[$(date)] Starting dashboard..."
-    nohup .venv/bin/streamlit run src/polybot/dashboard/app.py --server.port 8503 --server.address 0.0.0.0 > data/dashboard.log 2>&1 &
+    nohup .venv/bin/streamlit run src/polybot/dashboard/app.py --server.port 8501 --server.address 0.0.0.0 --browser.gatherUsageStats false >> data/dashboard.log 2>&1 &
+    echo $! > "$DASH_PID_FILE"
   fi
 }
 
