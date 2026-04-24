@@ -132,13 +132,18 @@ def should_trade(
         )
         return None
 
+    base_min_usdc = float(siz_cfg.get("min_trade_usdc", 10.0))
+    double_min_threshold = float(siz_cfg.get("double_min_above_usd", 200.0))
+    large_move = max(abs(binance_delta), abs(coinbase_delta)) >= double_min_threshold
+    effective_min_usdc = base_min_usdc * 2 if large_move else base_min_usdc
+
     from polybot.execution.sizing import kelly_size
     size = kelly_size(
         confidence=confidence,
         entry_price=book_ws.best_ask(direction) or 0.5,
         bankroll=bankroll,
         kelly_fraction=float(siz_cfg.get("kelly_fraction", 0.25)),
-        min_usdc=float(siz_cfg.get("min_trade_usdc", 10.0)),
+        min_usdc=effective_min_usdc,
         max_usdc=float(siz_cfg.get("max_trade_usdc", 200.0)),
     )
 
@@ -151,6 +156,7 @@ def should_trade(
         binance_delta=binance_delta,
         coinbase_delta=coinbase_delta,
         fast_pass=fast_pass_triggered,
+        doubled_min=large_move,
     )
 
     emit_evaluation(
@@ -162,6 +168,7 @@ def should_trade(
         snapshot_imbalance=round(imbalance, 3),
         confluence=True,
         fast_pass=fast_pass_triggered,
+        doubled_min=large_move,
         confidence=round(confidence, 3),
         size_usdc=round(size, 2),
         direction=direction.value,

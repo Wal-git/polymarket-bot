@@ -39,6 +39,7 @@ strategy:
     min_trade_usdc: 20
     max_trade_usdc: 200
     min_confidence: 0.80            # reject trades below this confidence
+    double_min_above_usd: 200.0     # either exchange delta >= this → double the minimum bet
 
   bankroll:
     source: wallet_balance          # live USDC balance; alternative: "fixed"
