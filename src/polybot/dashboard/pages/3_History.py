@@ -1,9 +1,20 @@
 """Historical slot evaluations — table view with rejection breakdown chart."""
 from __future__ import annotations
 
+from datetime import datetime, timezone, timedelta
+
 import pandas as pd
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
+
+_PDT = timezone(timedelta(hours=-7))
+
+
+def _to_pdt(iso: str) -> str:
+    try:
+        return datetime.fromisoformat(iso).astimezone(_PDT).strftime("%-I:%M %p PDT")
+    except Exception:
+        return iso[:19].replace("T", " ")
 
 st.set_page_config(page_title="History — POLYBOT", page_icon="◇", layout="wide")
 
@@ -67,7 +78,7 @@ else:
         reject = e.get("reject_reason") or ""
         result = "TRADE" if e.get("confluence") else reject.replace("_", " ").upper()
         rows.append({
-            "Time": (e.get("ts") or "")[:19].replace("T", " "),
+            "Time": _to_pdt(e.get("ts") or ""),
             "Slot": (e.get("slug") or "")[-10:],
             "P-T-B": f"${float(e.get('price_to_beat') or 0):,.0f}",
             "Binance Δ": f"{float(e.get('binance_delta') or 0):+.0f}",

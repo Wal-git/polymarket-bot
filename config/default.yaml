@@ -36,7 +36,7 @@ strategy:
   sizing:
     mode: kelly
     kelly_fraction: 0.25            # quarter-Kelly safety cap
-    min_trade_usdc: 20
+    min_trade_usdc: 30
     max_trade_usdc: 200
     min_confidence: 0.80            # reject trades below this confidence
     double_min_above_usd: 200.0     # either exchange delta >= this → double the minimum bet

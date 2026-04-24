@@ -16,7 +16,7 @@ from polybot.monitoring.tracker import PositionTracker
 logger = structlog.get_logger()
 console = Console()
 
-_REDEEM_INTERVAL_SECS = 1800  # re-scan for redeemable positions every 30 minutes
+_REDEEM_INTERVAL_SECS = 900  # re-scan for redeemable positions every 15 minutes
 
 
 class BtcEngine:
@@ -47,10 +47,22 @@ class BtcEngine:
 
     def _run_redeem(self) -> None:
         """Redeem any resolved positions and sync CLOB balance."""
-        count, _ = maybe_redeem(get_private_key(), self._clob.client)
+        from polybot.monitoring.event_log import emit_result
+        count, outcomes = maybe_redeem(get_private_key(), self._clob.client)
         if count:
             self._clob.sync_balance_allowance()
             invalidate_cache()
+        for outcome in outcomes:
+            if outcome.get("slug"):
+                emit_result(
+                    slug=outcome["slug"],
+                    won=outcome["won"],
+                    pnl=outcome["pnl"],
+                    shares=outcome["shares"],
+                    entry_price=outcome["entry_price"],
+                    exit_reason="HOLD_TO_RESOLUTION",
+                    exit_price=1.0 if outcome["won"] else 0.0,
+                )
 
     async def run(self) -> None:
         self._running = True

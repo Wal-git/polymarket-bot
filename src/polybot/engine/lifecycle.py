@@ -5,6 +5,7 @@ from enum import Enum
 from typing import Optional
 
 import structlog
+from web3 import Web3
 
 from polybot.account.balance import get_usdc_balance, invalidate_cache
 from polybot.client.clob import CLOBClient
@@ -240,8 +241,10 @@ class MarketLifecycle:
             self._tracker.close_position(token_id)
             self._tracker.save()
             # Record outcome for dashboard
+            matched = False
             for outcome in outcomes:
                 if outcome.get("slug") == self.slot.slug:
+                    matched = True
                     self.pnl = outcome["pnl"]
                     emit_result(
                         slug=self.slot.slug,
@@ -262,5 +265,47 @@ class MarketLifecycle:
                         pnl=f"{'+' if outcome['pnl'] >= 0 else ''}{outcome['pnl']:.2f}",
                     )
                     break
+
+            if not matched:
+                # API may lag behind on-chain resolution — retry a few times before giving up.
+                from polybot.execution.redeem import fetch_outcomes
+                from polybot.auth.wallet import get_private_key as _gpk
+                _pk = _gpk()
+                _addr = Web3(Web3.HTTPProvider("https://1rpc.io/matic")).eth.account.from_key(_pk).address
+                for _attempt in range(5):
+                    fallback = fetch_outcomes(_addr, [self.slot.slug])
+                    for outcome in fallback:
+                        if outcome.get("slug") == self.slot.slug:
+                            matched = True
+                            self.pnl = outcome["pnl"]
+                            emit_result(
+                                slug=self.slot.slug,
+                                won=outcome["won"],
+                                pnl=outcome["pnl"],
+                                shares=outcome["shares"],
+                                entry_price=outcome["entry_price"],
+                                direction=signal.direction.value,
+                                exit_reason="HOLD_TO_RESOLUTION",
+                                exit_price=1.0 if outcome["won"] else 0.0,
+                                confidence=signal.confidence,
+                                hold_duration_s=round(time.time() - signal_ts, 1),
+                            )
+                            logger.info(
+                                "trade_resolved_fallback",
+                                slug=self.slot.slug,
+                                won=outcome["won"],
+                                pnl=f"{'+' if outcome['pnl'] >= 0 else ''}{outcome['pnl']:.2f}",
+                            )
+                            break
+                    if matched:
+                        break
+                    wait = 2 ** _attempt  # 1s, 2s, 4s, 8s, 16s
+                    logger.warning(
+                        "outcome_api_lag",
+                        slug=self.slot.slug,
+                        attempt=_attempt + 1,
+                        retry_in=wait,
+                    )
+                    await asyncio.sleep(wait)
 
         self._state = LifecycleState.RESOLVED

@@ -107,42 +107,55 @@ def redeem_resolved_positions(private_key: str, clob_client) -> tuple[int, list[
         # For binary markets: outcome 0 → indexSet 1 (bit 0), outcome 1 → indexSet 2 (bit 1)
         index_set = 1 << outcome_index
 
-        try:
-            nonce = w3.eth.get_transaction_count(address)
-            gas_price = w3.eth.gas_price
+        for attempt in range(4):
+            delay = 2 ** attempt  # 1s, 2s, 4s, 8s
+            try:
+                nonce = w3.eth.get_transaction_count(address)
+                gas_price = w3.eth.gas_price
 
-            tx = ctf.functions.redeemPositions(
-                w3.to_checksum_address(collateral),
-                b"\x00" * 32,  # parentCollectionId = bytes32(0)
-                bytes.fromhex(condition_id[2:]),
-                [index_set],
-            ).build_transaction({
-                "from": address,
-                "nonce": nonce,
-                "gas": 150_000,
-                "gasPrice": int(gas_price * 1.1),
-                "chainId": 137,  # Polygon
-            })
+                tx = ctf.functions.redeemPositions(
+                    w3.to_checksum_address(collateral),
+                    b"\x00" * 32,  # parentCollectionId = bytes32(0)
+                    bytes.fromhex(condition_id[2:]),
+                    [index_set],
+                ).build_transaction({
+                    "from": address,
+                    "nonce": nonce,
+                    "gas": 150_000,
+                    "gasPrice": int(gas_price * 1.1),
+                    "chainId": 137,  # Polygon
+                })
 
-            signed = w3.eth.account.sign_transaction(tx, private_key)
-            tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
+                signed = w3.eth.account.sign_transaction(tx, private_key)
+                tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+                receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
 
-            if receipt.status == 1:
-                logger.info(
-                    "position_redeemed",
-                    condition_id=condition_id,
-                    size=pos.get("size"),
-                    tx=tx_hash.hex(),
-                )
-                redeemed += 1
-            else:
-                logger.warning("redeem_tx_failed", condition_id=condition_id, tx=tx_hash.hex())
+                if receipt.status == 1:
+                    logger.info(
+                        "position_redeemed",
+                        condition_id=condition_id,
+                        size=pos.get("size"),
+                        tx=tx_hash.hex(),
+                    )
+                    redeemed += 1
+                else:
+                    logger.warning("redeem_tx_failed", condition_id=condition_id, tx=tx_hash.hex())
+                break
 
-            time.sleep(2)  # avoid nonce collisions between transactions
+            except Exception as e:
+                if attempt < 3:
+                    logger.warning(
+                        "redeem_retry",
+                        condition_id=condition_id,
+                        attempt=attempt + 1,
+                        delay=delay,
+                        error=str(e),
+                    )
+                    time.sleep(delay)
+                else:
+                    logger.error("redeem_error", condition_id=condition_id, error=str(e))
 
-        except Exception as e:
-            logger.error("redeem_error", condition_id=condition_id, error=str(e))
+        time.sleep(2)  # avoid nonce collisions between transactions
 
     if redeemed > 0:
         try:
