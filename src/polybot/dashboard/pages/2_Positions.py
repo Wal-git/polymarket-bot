@@ -10,6 +10,7 @@ from streamlit_autorefresh import st_autorefresh
 st.set_page_config(page_title="Positions — POLYBOT", page_icon="◇", layout="wide")
 
 from polybot.dashboard.data_loader import (  # noqa: E402
+    STARTING_BALANCE,
     inject_styles,
     load_results,
     load_state,
@@ -66,6 +67,8 @@ else:
         pnl_str = f"+${pnl:.2f}" if pnl is not None and pnl >= 0 else (f"-${abs(pnl):.2f}" if pnl is not None else "—")
 
         confidence = result.get("confidence") if result else None
+        stake = float(t.get("size") or 0) * float(t.get("price") or 0)
+        pnl_pct_str = f"{pnl / stake * 100:+.1f}%" if (pnl is not None and stake > 0) else "—"
 
         rows.append({
             "Time (PDT)": _to_pdt(t.get("timestamp", "")),
@@ -73,10 +76,11 @@ else:
             "Direction": t.get("side", ""),
             "Shares": f"{float(t.get('size') or 0):.2f}",
             "Entry": f"${float(t.get('price') or 0):.2f}",
-            "Stake": f"${float(t.get('size') or 0) * float(t.get('price') or 0):.2f}",
+            "Stake": f"${stake:.2f}",
             "Confidence": f"{confidence:.1%}" if confidence is not None else "—",
             "Outcome": outcome,
             "P&L": pnl_str,
+            "P&L %": pnl_pct_str,
         })
 
     # Summary KPIs
@@ -93,9 +97,11 @@ else:
         st.markdown(f"""<div class="kpi-block"><div class="kpi-label">Losses</div>
         <div class="kpi-value" style="color:#F6465D">{losses}</div></div>""", unsafe_allow_html=True)
     with c4:
+        net_pct = total_pnl / STARTING_BALANCE * 100
         st.markdown(f"""<div class="kpi-block"><div class="kpi-label">Net P&L</div>
-        <div class="kpi-value" style="color:{pnl_color}">{pnl_sign}${total_pnl:.2f}</div></div>""",
-        unsafe_allow_html=True)
+        <div class="kpi-value" style="color:{pnl_color}">{pnl_sign}${total_pnl:.2f}</div>
+        <div style="font-size:0.75rem;color:{pnl_color};margin-top:0.15rem;">{net_pct:+.1f}%</div>
+        </div>""", unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)

@@ -20,6 +20,7 @@ inject_styles()
 st_autorefresh(interval=10_000, key="polybot_home_refresh")
 
 from polybot.dashboard.data_loader import (  # noqa: E402
+    STARTING_BALANCE,
     latest_evaluation,
     load_balance,
     load_config,
@@ -39,9 +40,9 @@ bal = load_balance()
 positions = state.get("positions", [])
 trades = state.get("trades", [])
 
-realized = sum(float(p.get("realized_pnl") or 0) for p in positions)
-unrealized = sum(float(p.get("unrealized_pnl") or 0) for p in positions)
-total_pnl = realized + unrealized
+bal_f = float(bal.get("balance", 0)) if bal else 0.0
+total_value_f = float(bal.get("total_value", bal_f)) if bal else 0.0
+total_pnl = (total_value_f - STARTING_BALANCE) if (bal and total_value_f > 0) else 0.0
 
 dry_run = cfg.get("bot", {}).get("dry_run", True)
 mode_str = "DRY RUN" if dry_run else "LIVE"
@@ -55,15 +56,16 @@ def _pnl_class(v: float) -> str:
 def _fmt_pnl(v: float) -> str:
     return f"+${v:,.2f}" if v >= 0 else f"-${abs(v):,.2f}"
 
-bal_f = float(bal.get("balance", 0)) if bal else 0.0
-
 col1, col2, col3, col4, col5, col6 = st.columns(6)
 
 with col1:
+    pnl_pct = total_pnl / STARTING_BALANCE * 100
+    pnl_pct_str = f"{pnl_pct:+.1f}%"
     st.markdown(f"""
     <div class="kpi-block">
         <div class="kpi-label">Total P&L</div>
         <div class="kpi-value {_pnl_class(total_pnl)}">{_fmt_pnl(total_pnl)}</div>
+        <div style="font-size:0.75rem;color:{'#0ECB81' if total_pnl >= 0 else '#F6465D'};margin-top:0.15rem;">{pnl_pct_str}</div>
     </div>""", unsafe_allow_html=True)
 
 with col2:
