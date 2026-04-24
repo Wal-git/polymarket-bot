@@ -48,6 +48,11 @@ class BtcEngine:
     def _run_redeem(self) -> None:
         """Redeem any resolved positions and sync CLOB balance."""
         from polybot.monitoring.event_log import emit_result
+        slug_confidence = {
+            p.market_question: p.confidence
+            for p in self._tracker.positions
+            if p.confidence is not None
+        }
         count, outcomes = maybe_redeem(get_private_key(), self._clob.client)
         if count:
             self._clob.sync_balance_allowance()
@@ -62,6 +67,7 @@ class BtcEngine:
                     entry_price=outcome["entry_price"],
                     exit_reason="HOLD_TO_RESOLUTION",
                     exit_price=1.0 if outcome["won"] else 0.0,
+                    confidence=slug_confidence.get(outcome["slug"]),
                 )
 
     async def run(self) -> None:
