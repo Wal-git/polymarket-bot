@@ -14,14 +14,32 @@ strategy:
 
   signals:
     divergence:
-      min_gap_usd: 75.0             # Both Binance & Coinbase must be this far past price_to_beat
-      fast_pass_usd: 150.0          # Either exchange this far past price_to_beat → skip min_gap check
+      min_gap_usd: 100.0            # Per-exchange gap past price_to_beat for a "vote"
+      max_gap_usd: 0.0              # Off (0 = disabled) — was 200.0; previously rejected over-extended divergences
+      fast_pass_enabled: false      # Off — only fire via N-of-M agreement, not single-exchange spikes
+      fast_pass_usd: 125.0          # (unused while fast_pass_enabled=false)
+      min_agreement: 3              # N-of-M exchanges must agree past min_gap (3-of-5 default)
       require_chainlink_gap: true
     imbalance:
       buy_threshold: 1.8            # retained for data capture only — not used as a trade gate
       sell_threshold: 0.55
       detection_window_seconds: [30, 90]
       depth_levels: 10
+    chainlink:
+      enabled: true                 # log chainlink price/lag in evaluations (no gating yet)
+      rpc_url: "https://1rpc.io/matic"
+      aggregator_address: "0xc907E116054Ad103354f2D350FD2514433D57F6f"  # Polygon BTC/USD
+    futures:
+      enabled: true                 # log Binance Futures mark/funding in evaluations (no gating yet)
+      url: "https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT"
+    calibration:
+      enabled: false                # off until we have ~200+ trades — table is too sparse
+      table_path: "data/calibration_table.json"
+      min_n: 5                      # min trials per cell before using it (else fallback)
+      fallback_confidence: 0.75     # used when no bucket and global both insufficient
+    macro:
+      enabled: true                 # log VIX / DXY / ES futures into evaluations (no gating)
+                                    # Review value after ~4 weeks of data — if no signal, delete this feed.
 
   entry:
     window_seconds: [60, 180]       # skip signals outside this range after market open
