@@ -75,8 +75,11 @@ async def fetch_slot_details(slug: str) -> Optional[SlotInfo]:
         if price_to_beat == 0:
             prices = await fetch_btc_prices()
             if prices is not None:
-                price_to_beat = round((prices.binance + prices.coinbase) / 2, 2)
-                logger.info("price_to_beat_live_fallback", slug=slug, price=price_to_beat)
+                avail = prices.exchange_prices()
+                if avail:
+                    price_to_beat = round(sum(avail.values()) / len(avail), 2)
+                    logger.info("price_to_beat_live_fallback", slug=slug,
+                                price=price_to_beat, sources=list(avail.keys()))
 
         start_ms, end_ms = slot_from_slug(slug)
         return SlotInfo(

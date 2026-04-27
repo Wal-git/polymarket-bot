@@ -11,7 +11,10 @@ from polybot.account.balance import get_usdc_balance, invalidate_cache
 from polybot.client.clob import CLOBClient
 from polybot.execution.entry import execute_entry
 from polybot.execution.exit import monitor_position
+from polybot.feeds.binance_futures import fetch_futures_snapshot
 from polybot.feeds.btc_price import fetch_btc_prices
+from polybot.feeds.chainlink import fetch_chainlink_round
+from polybot.feeds.macro import fetch_macro_snapshot
 from polybot.feeds.orderbook_ws import OrderBookWS
 from polybot.models.btc_market import Direction, ExitReason, SlotInfo
 from polybot.monitoring.tracker import PositionTracker
@@ -112,11 +115,56 @@ class MarketLifecycle:
             self._state = LifecycleState.RESOLVED
             return
 
+        signals_cfg = self._config.get("strategy", {}).get("signals", {})
+        chainlink_cfg = signals_cfg.get("chainlink", {})
+        chainlink_enabled = bool(chainlink_cfg.get("enabled", True))
+        rpc_url = chainlink_cfg.get("rpc_url")
+        aggregator = chainlink_cfg.get("aggregator_address")
+
+        chainlink_task = (
+            asyncio.create_task(
+                fetch_chainlink_round(rpc_url=rpc_url, address=aggregator)
+                if (rpc_url and aggregator)
+                else fetch_chainlink_round()
+            )
+            if chainlink_enabled
+            else None
+        )
+
+        futures_cfg = signals_cfg.get("futures", {})
+        futures_enabled = bool(futures_cfg.get("enabled", True))
+        futures_url = futures_cfg.get("url")
+        futures_task = (
+            asyncio.create_task(
+                fetch_futures_snapshot(url=futures_url)
+                if futures_url
+                else fetch_futures_snapshot()
+            )
+            if futures_enabled
+            else None
+        )
+
+        macro_cfg = signals_cfg.get("macro", {})
+        macro_enabled = bool(macro_cfg.get("enabled", True))
+        macro_task = (
+            asyncio.create_task(fetch_macro_snapshot()) if macro_enabled else None
+        )
+
         prices = await fetch_btc_prices()
         if prices is None:
             logger.warning("price_unavailable", slug=self.slot.slug)
+            if chainlink_task:
+                chainlink_task.cancel()
+            if futures_task:
+                futures_task.cancel()
+            if macro_task:
+                macro_task.cancel()
             self._state = LifecycleState.RESOLVED
             return
+
+        chainlink = await chainlink_task if chainlink_task else None
+        futures = await futures_task if futures_task else None
+        macro = await macro_task if macro_task else None
 
         bankroll_cfg = self._config.get("strategy", {}).get("bankroll", {})
         if bankroll_cfg.get("source") == "wallet_balance":
@@ -130,6 +178,9 @@ class MarketLifecycle:
             slot=self.slot,
             bankroll=bankroll,
             config=self._config.get("strategy", {}),
+            chainlink=chainlink,
+            futures=futures,
+            macro=macro,
         )
 
         if signal is None:

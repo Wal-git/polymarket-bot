@@ -264,3 +264,109 @@ else:
         "Cumulative %": [f"{v / STARTING_BALANCE * 100:+.1f}%" for v in table_rows["cumulative_pnl"].values],
     })
     st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+# ── P&L by hour of day (Pacific) ───────────────────────────────────────────────
+st.markdown("<br>", unsafe_allow_html=True)
+st.markdown('<div class="page-header">P&L BY HOUR OF DAY (PACIFIC)</div>', unsafe_allow_html=True)
+
+# Aggregate every resolved trade into 24 Pacific-hour buckets
+hourly_pnl: dict[int, float] = {h: 0.0 for h in range(24)}
+hourly_wins: dict[int, int] = {h: 0 for h in range(24)}
+hourly_count: dict[int, int] = {h: 0 for h in range(24)}
+for r in results:
+    ts = r.get("ts", "")
+    if not ts:
+        continue
+    try:
+        h = datetime.fromisoformat(ts).astimezone(PDT).hour
+    except Exception:
+        continue
+    hourly_pnl[h] += float(r.get("pnl", 0))
+    hourly_count[h] += 1
+    if r.get("won"):
+        hourly_wins[h] += 1
+
+if sum(hourly_count.values()) == 0:
+    st.info("No resolved trades yet — hourly chart will appear once markets resolve.")
+else:
+    hour_records = []
+    for h in range(24):
+        n = hourly_count[h]
+        wr = (hourly_wins[h] / n) if n else 0.0
+        hour_records.append({
+            "hour": f"{h:02d}:00",
+            "hour_int": h,
+            "pnl": round(hourly_pnl[h], 2),
+            "trades": n,
+            "wins": hourly_wins[h],
+            "win_rate": round(wr, 3),
+        })
+
+    vega_hour_pnl = {
+        "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+        "height": 240,
+        "data": {"values": hour_records},
+        "mark": {"type": "bar", "cornerRadiusTopLeft": 2, "cornerRadiusTopRight": 2},
+        "encoding": {
+            "x": {
+                "field": "hour",
+                "type": "ordinal",
+                "axis": {
+                    "labelColor": "#848E9C",
+                    "gridColor": "rgba(255,255,255,0.04)",
+                    "domainColor": "rgba(255,255,255,0.1)",
+                    "tickColor": "transparent",
+                    "labelAngle": -45,
+                    "labelFontSize": 10,
+                },
+                "title": None,
+                "sort": [f"{h:02d}:00" for h in range(24)],
+            },
+            "y": {
+                "field": "pnl",
+                "type": "quantitative",
+                "axis": {
+                    "labelColor": "#848E9C",
+                    "gridColor": "rgba(255,255,255,0.06)",
+                    "domainColor": "transparent",
+                    "tickColor": "transparent",
+                    "format": "$,.2f",
+                    "labelFontSize": 11,
+                },
+                "title": None,
+            },
+            "color": {
+                "condition": {"test": "datum.pnl >= 0", "value": "#0ECB81"},
+                "value": "#F6465D",
+            },
+            "tooltip": [
+                {"field": "hour", "type": "ordinal", "title": "Hour (PT)"},
+                {"field": "trades", "type": "quantitative", "title": "Trades"},
+                {"field": "wins", "type": "quantitative", "title": "Wins"},
+                {"field": "win_rate", "type": "quantitative", "title": "Win Rate", "format": ".1%"},
+                {"field": "pnl", "type": "quantitative", "title": "Total P&L", "format": "$,.2f"},
+            ],
+        },
+        "config": {"background": "transparent", "view": {"stroke": "transparent"}},
+    }
+    st.vega_lite_chart(vega_hour_pnl, use_container_width=True, theme=None)
+
+    # Companion table — only hours that had activity
+    active_rows = [r for r in hour_records if r["trades"] > 0]
+    if active_rows:
+        active_rows.sort(key=lambda r: r["pnl"])  # worst first
+        hour_df = pd.DataFrame({
+            "Hour (PT)": [r["hour"] for r in active_rows],
+            "Trades": [r["trades"] for r in active_rows],
+            "Win Rate": [f"{r['wins']}/{r['trades']} ({r['win_rate']:.0%})" for r in active_rows],
+            "Total P&L": [
+                f"+${r['pnl']:,.2f}" if r["pnl"] >= 0 else f"-${abs(r['pnl']):,.2f}"
+                for r in active_rows
+            ],
+            "Avg P&L / trade": [
+                f"+${r['pnl']/r['trades']:,.2f}" if r["pnl"] >= 0
+                else f"-${abs(r['pnl'])/r['trades']:,.2f}"
+                for r in active_rows
+            ],
+        })
+        st.dataframe(hour_df, use_container_width=True, hide_index=True)
