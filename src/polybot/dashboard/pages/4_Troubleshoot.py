@@ -190,17 +190,30 @@ with tab_signals:
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("**Divergence Check**")
-        min_gap = float(sig_cfg.get("divergence", {}).get("min_gap_usd", 50.0))
+        div_cfg = sig_cfg.get("divergence", {})
+        min_gap = float(div_cfg.get("min_gap_usd", 50.0))
+        min_agreement = int(div_cfg.get("min_agreement", 3))
         sim_ptb = st.number_input("Price to Beat ($)", value=93000.0, step=100.0)
-        sim_binance = st.number_input("Binance Price ($)", value=93000.0, step=10.0)
-        sim_coinbase = st.number_input("Coinbase Price ($)", value=93000.0, step=10.0)
-        b_gap = sim_binance - sim_ptb
-        c_gap = sim_coinbase - sim_ptb
-        div_up = b_gap > min_gap and c_gap > min_gap
-        div_dn = b_gap < -min_gap and c_gap < -min_gap
+        sim_prices = {
+            "Binance":  st.number_input("Binance Price ($)",  value=93000.0, step=10.0, key="sim_binance"),
+            "Coinbase": st.number_input("Coinbase Price ($)", value=93000.0, step=10.0, key="sim_coinbase"),
+            "Kraken":   st.number_input("Kraken Price ($)",   value=93000.0, step=10.0, key="sim_kraken"),
+            "Bitstamp": st.number_input("Bitstamp Price ($)", value=93000.0, step=10.0, key="sim_bitstamp"),
+            "OKX":      st.number_input("OKX Price ($)",      value=93000.0, step=10.0, key="sim_okx"),
+        }
+        sim_deltas = {name: price - sim_ptb for name, price in sim_prices.items()}
+        up_votes = sum(1 for d in sim_deltas.values() if d > min_gap)
+        down_votes = sum(1 for d in sim_deltas.values() if d < -min_gap)
+        div_up = up_votes >= min_agreement and down_votes == 0
+        div_dn = down_votes >= min_agreement and up_votes == 0
         div_result = "UP" if div_up else ("DOWN" if div_dn else "NO SIGNAL")
         div_color = "#0ECB81" if div_up or div_dn else "#F6465D"
-        st.markdown(f"Binance Δ: **{b_gap:+.2f}** · Coinbase Δ: **{c_gap:+.2f}** · Min gap: ±{min_gap}")
+        deltas_str = " · ".join(f"{n} **{d:+.0f}**" for n, d in sim_deltas.items())
+        st.markdown(deltas_str)
+        st.markdown(
+            f"Min gap: ±{min_gap} · Agreement: {min_agreement}-of-5 "
+            f"· UP votes: {up_votes} · DOWN votes: {down_votes}"
+        )
         st.markdown(f'Result: <span style="color:{div_color};font-weight:700;">{div_result}</span>', unsafe_allow_html=True)
 
     with col2:
@@ -233,14 +246,29 @@ with tab_signals:
     evals = load_evaluations(last_n=200)
     if evals:
         with_div = [e for e in evals if e.get("div_direction")]
-        avg_b_delta = sum(abs(e.get("binance_delta") or 0) for e in evals) / len(evals)
-        avg_ratio = [e.get("imbalance_ratio") for e in evals if e.get("imbalance_ratio") is not None]
-        avg_r = sum(avg_ratio) / len(avg_ratio) if avg_ratio else 0
+        avg_ratio_vals = [e.get("imbalance_ratio") for e in evals if e.get("imbalance_ratio") is not None]
+        avg_r = sum(avg_ratio_vals) / len(avg_ratio_vals) if avg_ratio_vals else 0
 
-        sc1, sc2, sc3 = st.columns(3)
+        # Per-exchange average |delta| over the same window — only counts
+        # evaluations where that exchange returned a value, so an outage
+        # doesn't drag its average toward zero.
+        exchange_labels = [
+            ("binance", "Binance"), ("coinbase", "Coinbase"), ("kraken", "Kraken"),
+            ("bitstamp", "Bitstamp"), ("okx", "OKX"),
+        ]
+        avg_deltas: dict[str, float | None] = {}
+        for key, label in exchange_labels:
+            vals = [abs(e.get(f"{key}_delta") or 0) for e in evals if e.get(f"{key}_delta") is not None]
+            avg_deltas[label] = (sum(vals) / len(vals)) if vals else None
+
+        cols = st.columns(5)
+        for col, (_, label) in zip(cols, exchange_labels):
+            v = avg_deltas[label]
+            with col:
+                st.metric(f"Avg |{label} Δ|", f"${v:.2f}" if v is not None else "—")
+
+        sc1, sc2 = st.columns(2)
         with sc1:
-            st.metric("Avg |Binance Δ|", f"${avg_b_delta:.2f}")
-        with sc2:
             st.metric("Divergence hit rate", f"{100*len(with_div)/len(evals):.1f}%")
-        with sc3:
+        with sc2:
             st.metric("Avg imbalance ratio", f"{avg_r:.3f}")

@@ -262,6 +262,49 @@ html, body, [class*="css"] { font-family: 'Inter', Arial, sans-serif !important;
 _ASSET_FILTER_KEY = "selected_asset"
 _ASSET_FILTER_ALL = "All"
 
+# Order matches the 5 exchanges in polybot.feeds.spot_price._FETCHERS.
+EXCHANGE_NAMES: tuple[str, ...] = ("binance", "coinbase", "kraken", "bitstamp", "okx")
+_EXCHANGE_LABELS: dict[str, str] = {
+    "binance": "Binance",
+    "coinbase": "Coinbase",
+    "kraken": "Kraken",
+    "bitstamp": "Bitstamp",
+    "okx": "OKX",
+}
+
+
+def render_exchange_tiles(ev: dict) -> str:
+    """Return HTML for one tile per exchange in EXCHANGE_NAMES order.
+
+    When an exchange returned None for a particular evaluation, the tile is
+    dimmed with an em-dash placeholder rather than omitted, so column
+    positions stay stable between cards.
+    """
+    parts = []
+    for name in EXCHANGE_NAMES:
+        price = ev.get(name)
+        delta = ev.get(f"{name}_delta")
+        label = _EXCHANGE_LABELS[name]
+        if price is None:
+            parts.append(
+                f'<div style="background:rgba(0,0,0,0.15);padding:0.5rem;border-radius:3px;opacity:0.4;">'
+                f'<div style="font-size:0.65rem;color:#848E9C;text-transform:uppercase;letter-spacing:0.08em;">{label}</div>'
+                f'<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:1rem;color:#848E9C;">—</div>'
+                f'<div style="font-size:0.7rem;color:#848E9C;">—</div>'
+                f'</div>'
+            )
+            continue
+        d = float(delta or 0)
+        delta_color = "#0ECB81" if d > 0 else ("#F6465D" if d < 0 else "#848E9C")
+        parts.append(
+            f'<div style="background:rgba(0,0,0,0.15);padding:0.5rem;border-radius:3px;">'
+            f'<div style="font-size:0.65rem;color:#848E9C;text-transform:uppercase;letter-spacing:0.08em;">{label}</div>'
+            f'<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:1rem;color:#EAECEF;font-variant-numeric:tabular-nums;">${float(price):,.2f}</div>'
+            f'<div style="font-size:0.7rem;color:{delta_color};">{d:+.2f}</div>'
+            f'</div>'
+        )
+    return "".join(parts)
+
 
 def selected_asset() -> str | None:
     """Return the asset filter selected in the sidebar, or None for 'All'.
