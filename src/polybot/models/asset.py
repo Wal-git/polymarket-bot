@@ -32,7 +32,7 @@ class AssetThresholds:
 class AssetSpec:
     """All asset-specific knobs the engine, feeds, and signals consume."""
     name: str                                  # "BTC", "ETH"
-    slug_prefix: str                           # "btc-updown-5m", "ethereum-updown-5m"
+    slug_prefix: str                           # "btc-updown-5m", "eth-updown-5m"
     slot_base_timestamp: int                   # unix seconds, anchor for the 5-min grid
     slot_interval_s: int = 300
     spot_urls: dict[str, str] = field(default_factory=dict)  # exchange_name -> URL
@@ -41,3 +41,7 @@ class AssetSpec:
     chainlink_rpc_url: Optional[str] = None
     calibration_table_path: Optional[str] = None  # data/calibration_table.{asset}.json
     thresholds: AssetThresholds = field(default_factory=AssetThresholds)
+    # When True, the lifecycle evaluates signals and writes evaluations to
+    # the event log but never calls execute_entry. Used to validate a new
+    # asset against live data before placing real orders.
+    eval_only: bool = False

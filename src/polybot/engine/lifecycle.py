@@ -198,6 +198,30 @@ class MarketLifecycle:
 
         signal_ts = time.time()
 
+        # Eval-only mode: signal was evaluated and logged via the combiner,
+        # but we don't place an order. Used during the canary period for a
+        # new asset before flipping to live trading.
+        if self.asset.eval_only:
+            from polybot.monitoring.event_log import emit_execution
+            logger.info(
+                "eval_only_skipping_order",
+                slug=self.slot.slug, asset=self.asset.name,
+                direction=signal.direction.value,
+                confidence=signal.confidence,
+                size_usdc=round(signal.size_usdc, 2),
+            )
+            emit_execution(
+                slug=self.slot.slug,
+                asset=self.asset.name,
+                status="blocked",
+                block_reason="eval_only",
+                direction=signal.direction.value,
+                confidence=signal.confidence,
+                size_usdc=round(signal.size_usdc, 2),
+            )
+            self._state = LifecycleState.RESOLVED
+            return
+
         # Re-fetch live balance immediately before placing order
         invalidate_cache()
         live_balance = float(get_usdc_balance(self._clob))

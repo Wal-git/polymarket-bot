@@ -57,6 +57,7 @@ def _build_asset_specs(config: dict) -> list[AssetSpec]:
                 chainlink_aggregator=body.get("chainlink_aggregator"),
                 chainlink_rpc_url=body.get("chainlink_rpc_url"),
                 calibration_table_path=body.get("calibration_table_path"),
+                eval_only=bool(body.get("eval_only", False)),
                 thresholds=AssetThresholds(
                     min_gap_usd=thresholds_block.get("min_gap_usd"),
                     max_gap_usd=thresholds_block.get("max_gap_usd"),
