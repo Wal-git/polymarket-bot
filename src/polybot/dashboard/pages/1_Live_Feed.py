@@ -6,7 +6,13 @@ from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="Live Feed — POLYBOT", page_icon="◇", layout="wide")
 
-from polybot.dashboard.data_loader import inject_styles, load_evaluations, load_results, render_sidebar  # noqa: E402
+from polybot.dashboard.data_loader import (  # noqa: E402
+    apply_asset_filter,
+    inject_styles,
+    load_evaluations,
+    load_results,
+    render_sidebar,
+)
 
 inject_styles()
 st_autorefresh(interval=5_000, key="live_feed_refresh")
@@ -29,6 +35,7 @@ def _render_eval_card(ev: dict, result: dict | None = None) -> None:
     except Exception:
         ts = (ev.get("ts") or "")[:19].replace("T", " ")
     slug = ev.get("slug", "—")
+    asset = ev.get("asset", "BTC")
     ptb = ev.get("price_to_beat") or 0
     binance = ev.get("binance") or 0
     coinbase = ev.get("coinbase") or 0
@@ -54,6 +61,10 @@ def _render_eval_card(ev: dict, result: dict | None = None) -> None:
                 border-left:3px solid {border};border-radius:4px 4px 0 0;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
             <div>
+                <span style="font-family:'Inter',sans-serif;font-size:0.65rem;font-weight:700;
+                             color:#F0B90B;background:rgba(240,185,11,0.12);
+                             padding:0.1rem 0.4rem;border-radius:3px;letter-spacing:0.08em;
+                             margin-right:0.5rem;">{asset}</span>
                 <span style="font-family:'Barlow Condensed',sans-serif;font-size:0.95rem;
                              font-weight:700;color:#EAECEF;letter-spacing:0.06em;">{slug}</span>
                 <span style="font-family:'Inter',sans-serif;font-size:0.68rem;
@@ -119,7 +130,7 @@ with col1:
 with col2:
     last_n = st.number_input("Last N", min_value=10, max_value=500, value=50, step=10, label_visibility="collapsed")
 
-evals = load_evaluations(last_n=int(last_n))
+evals = apply_asset_filter(load_evaluations(last_n=int(last_n)))
 
 if filter_opt == "trades only":
     evals = [e for e in evals if e.get("confluence")]
