@@ -5,7 +5,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from polybot.engine.lifecycle import LifecycleState, MarketLifecycle
+from polybot.models.asset import AssetSpec
 from polybot.models.btc_market import SlotInfo
+
+
+_TEST_ASSET = AssetSpec(
+    name="BTC",
+    slug_prefix="btc-updown-5m",
+    slot_base_timestamp=1772568900,
+    spot_urls={"binance": "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"},
+)
 
 
 def _make_slot(offset_secs: int = 0) -> SlotInfo:
@@ -45,7 +54,8 @@ def _make_lifecycle(slot: SlotInfo, dry_run: bool = True) -> MarketLifecycle:
         }
     }
     return MarketLifecycle(
-        slot=slot, clob=clob, tracker=tracker, dry_run=dry_run, config=config
+        slot=slot, asset=_TEST_ASSET, clob=clob, tracker=tracker,
+        dry_run=dry_run, config=config,
     )
 
 

@@ -24,7 +24,7 @@ _BOT_LOG_FILE = Path("data/bot.log")
 _BALANCE_FILE = Path("data/balance.json")
 _CONFIG_FILE = Path("config/default.yaml")
 
-STARTING_BALANCE = 180.0
+STARTING_BALANCE = 275.0
 
 
 @st.cache_data(ttl=5)
@@ -79,10 +79,11 @@ def load_results_deduped() -> list[dict]:
             continue
         try:
             r = json.loads(line)
-            if "slug" in r:
-                seen[r["slug"]] = r
         except json.JSONDecodeError:
             continue
+        if "slug" in r:
+            r.setdefault("asset", "BTC")
+            seen[r["slug"]] = r
     return sorted(seen.values(), key=lambda r: r.get("ts", ""))
 
 
@@ -114,9 +115,13 @@ def _tail_jsonl(path: Path, last_n: int) -> list[dict]:
         if not line:
             continue
         try:
-            out.append(json.loads(line))
+            rec = json.loads(line)
         except json.JSONDecodeError:
             continue
+        # Records written before the multi-asset refactor lack the "asset"
+        # field — default to BTC so dashboard rendering stays consistent.
+        rec.setdefault("asset", "BTC")
+        out.append(rec)
     return out
 
 
