@@ -4,13 +4,14 @@ from typing import Optional
 import structlog
 
 from polybot.feeds.orderbook_ws import OrderBookWS
-from polybot.models.btc_market import (
-    BtcPrices,
+from polybot.models.asset import AssetSpec
+from polybot.models.market import (
     ChainlinkRound,
     Direction,
     FuturesSnapshot,
     MacroSnapshot,
     SlotInfo,
+    SpotPrices,
     TradeSignal,
 )
 from polybot.monitoring.event_log import emit_evaluation
@@ -22,11 +23,12 @@ logger = structlog.get_logger()
 
 
 def should_trade(
-    prices: BtcPrices,
+    prices: SpotPrices,
     book_ws: OrderBookWS,
     slot: SlotInfo,
     bankroll: float,
     config: dict,
+    asset: Optional[AssetSpec] = None,
     chainlink: Optional[ChainlinkRound] = None,
     futures: Optional[FuturesSnapshot] = None,
     macro: Optional[MacroSnapshot] = None,
@@ -46,9 +48,19 @@ def should_trade(
     imb_cfg = sig_cfg.get("imbalance", {})
     siz_cfg = config.get("sizing", {})
 
-    min_gap = float(div_cfg.get("min_gap_usd", 75.0))
-    max_gap = float(div_cfg.get("max_gap_usd", 0.0))  # 0 = disabled
-    fast_pass = float(div_cfg.get("fast_pass_usd", 200.0))
+    # Per-asset threshold overrides take precedence over the strategy block.
+    asset_thresholds = asset.thresholds if asset is not None else None
+
+    def _override(name: str, fallback: float) -> float:
+        if asset_thresholds is not None:
+            v = getattr(asset_thresholds, name, None)
+            if v is not None:
+                return float(v)
+        return float(fallback)
+
+    min_gap = _override("min_gap_usd", div_cfg.get("min_gap_usd", 75.0))
+    max_gap = _override("max_gap_usd", div_cfg.get("max_gap_usd", 0.0))  # 0 = disabled
+    fast_pass = _override("fast_pass_usd", div_cfg.get("fast_pass_usd", 200.0))
     fast_pass_enabled = bool(div_cfg.get("fast_pass_enabled", True))
     min_agreement = int(div_cfg.get("min_agreement", 2))
     threshold_buy = float(imb_cfg.get("buy_threshold", 1.8))
@@ -76,6 +88,7 @@ def should_trade(
 
     _base = dict(
         slug=slot.slug,
+        asset=asset.name if asset is not None else None,
         price_to_beat=slot.price_to_beat,
         sources_available=len(available),
         **_per_exchange_diag,
@@ -250,7 +263,12 @@ def should_trade(
     cal_cfg = sig_cfg.get("calibration", {})
     confidence_source = "formula"
     if cal_cfg.get("enabled", False):
-        table = calibration_mod.load_table(cal_cfg.get("table_path", "data/calibration_table.json"))
+        table_path = (
+            asset.calibration_table_path
+            if (asset is not None and asset.calibration_table_path)
+            else cal_cfg.get("table_path", "data/calibration_table.json")
+        )
+        table = calibration_mod.load_table(table_path)
         if table is not None:
             cal_min_n = int(cal_cfg.get("min_n", 5))
             cal_fallback = float(cal_cfg.get("fallback_confidence", 0.75))
@@ -287,7 +305,9 @@ def should_trade(
         return None
 
     base_min_usdc = float(siz_cfg.get("min_trade_usdc", 10.0))
-    double_min_threshold = float(siz_cfg.get("double_min_above_usd", 200.0))
+    double_min_threshold = _override(
+        "double_min_above_usd", siz_cfg.get("double_min_above_usd", 200.0)
+    )
     large_move = max_abs_delta >= double_min_threshold
     effective_min_usdc = base_min_usdc * 2 if large_move else base_min_usdc
 

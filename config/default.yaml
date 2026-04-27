@@ -5,6 +5,57 @@ bot:
   halt_file: ./HALT
   log_level: INFO
 
+# Per-asset configuration. The engine runs one lifecycle pipeline per
+# enabled asset using the same shared CLOB client, position tracker, and
+# bankroll. Signal/sizing thresholds default to the ``strategy:`` block
+# below; per-asset overrides go in ``assets.<name>.thresholds``.
+assets:
+  BTC:
+    enabled: true
+    slug_prefix: "btc-updown-5m"
+    slot_base_timestamp: 1772568900   # unix seconds, anchor for the 5-min grid
+    slot_interval_s: 300
+    spot_urls:
+      binance:  "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
+      coinbase: "https://api.coinbase.com/v2/prices/BTC-USD/spot"
+      kraken:   "https://api.kraken.com/0/public/Ticker?pair=XBTUSD"
+      bitstamp: "https://www.bitstamp.net/api/v2/ticker/btcusd/"
+      okx:      "https://www.okx.com/api/v5/market/ticker?instId=BTC-USDT"
+    futures_url: "https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT"
+    chainlink_aggregator: "0xc907E116054Ad103354f2D350FD2514433D57F6f"  # Polygon BTC/USD
+    chainlink_rpc_url: "https://1rpc.io/matic"
+    calibration_table_path: "data/calibration_table.json"
+    eval_only: false                  # live trading
+    # No threshold overrides — BTC uses the strategy.signals defaults below.
+
+  ETH:
+    # Polymarket lists 5-min ETH up/down markets on the same grid as BTC.
+    # Verified 2026-04-27: slug prefix `eth-updown-5m`, same slot anchor.
+    enabled: true
+    eval_only: true                   # log signals, do not place orders
+                                      # Flip to false once threshold tuning is validated.
+    slug_prefix: "eth-updown-5m"
+    slot_base_timestamp: 1772568900   # same 5-min grid as BTC (verified)
+    slot_interval_s: 300
+    spot_urls:
+      binance:  "https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT"
+      coinbase: "https://api.coinbase.com/v2/prices/ETH-USD/spot"
+      kraken:   "https://api.kraken.com/0/public/Ticker?pair=ETHUSD"
+      bitstamp: "https://www.bitstamp.net/api/v2/ticker/ethusd/"
+      okx:      "https://www.okx.com/api/v5/market/ticker?instId=ETH-USDT"
+    futures_url: "https://fapi.binance.com/fapi/v1/premiumIndex?symbol=ETHUSDT"
+    chainlink_aggregator: "0xF9680D99D6C9589e2a93a78A04A279e509205945"  # Polygon ETH/USD
+    chainlink_rpc_url: "https://1rpc.io/matic"
+    calibration_table_path: "data/calibration_table_eth.json"
+    # USD-denominated thresholds scaled for ETH price level (~$2.3k vs BTC ~$80k).
+    # Eyeballed at strategy_defaults / 33 (price ratio); refine after observing
+    # ~1 week of evaluations.jsonl for ETH and matching BTC's ~15% slot-fire rate.
+    thresholds:
+      min_gap_usd: 5.0                # was 100 for BTC
+      max_gap_usd: 0.0                # disabled, same as BTC
+      fast_pass_usd: 10.0             # unused while fast_pass_enabled=false
+      double_min_above_usd: 10.0      # was 200 for BTC
+
 strategy:
   name: btc_5min
   market_filter:

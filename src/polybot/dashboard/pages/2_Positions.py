@@ -15,6 +15,7 @@ from polybot.dashboard.data_loader import (  # noqa: E402
     load_results,
     load_state,
     render_sidebar,
+    strip_slug_prefix,
 )
 
 inject_styles()
@@ -72,7 +73,8 @@ else:
 
         rows.append({
             "Time (PDT)": _to_pdt(t.get("timestamp", "")),
-            "Market": slug.replace("btc-updown-5m-", ""),
+            "Asset": (result or {}).get("asset", "BTC") if result else "BTC",
+            "Market": strip_slug_prefix(slug),
             "Direction": t.get("side", ""),
             "Shares": f"{float(t.get('size') or 0):.2f}",
             "Entry": f"${float(t.get('price') or 0):.2f}",

@@ -24,7 +24,7 @@ _BOT_LOG_FILE = Path("data/bot.log")
 _BALANCE_FILE = Path("data/balance.json")
 _CONFIG_FILE = Path("config/default.yaml")
 
-STARTING_BALANCE = 180.0
+STARTING_BALANCE = 275.0
 
 
 @st.cache_data(ttl=5)
@@ -79,10 +79,11 @@ def load_results_deduped() -> list[dict]:
             continue
         try:
             r = json.loads(line)
-            if "slug" in r:
-                seen[r["slug"]] = r
         except json.JSONDecodeError:
             continue
+        if "slug" in r:
+            r.setdefault("asset", "BTC")
+            seen[r["slug"]] = r
     return sorted(seen.values(), key=lambda r: r.get("ts", ""))
 
 
@@ -114,9 +115,13 @@ def _tail_jsonl(path: Path, last_n: int) -> list[dict]:
         if not line:
             continue
         try:
-            out.append(json.loads(line))
+            rec = json.loads(line)
         except json.JSONDecodeError:
             continue
+        # Records written before the multi-asset refactor lack the "asset"
+        # field — default to BTC so dashboard rendering stays consistent.
+        rec.setdefault("asset", "BTC")
+        out.append(rec)
     return out
 
 
@@ -254,6 +259,52 @@ html, body, [class*="css"] { font-family: 'Inter', Arial, sans-serif !important;
         st.markdown(_html, unsafe_allow_html=True)
 
 
+_ASSET_FILTER_KEY = "selected_asset"
+_ASSET_FILTER_ALL = "All"
+
+
+def selected_asset() -> str | None:
+    """Return the asset filter selected in the sidebar, or None for 'All'.
+
+    Pages call this after loading records and pass the result to
+    ``apply_asset_filter`` to honor the user's choice.
+    """
+    val = st.session_state.get(_ASSET_FILTER_KEY, _ASSET_FILTER_ALL)
+    return None if val == _ASSET_FILTER_ALL else val
+
+
+def apply_asset_filter(records: list[dict], asset: str | None = None) -> list[dict]:
+    """Filter records by asset. Records without an explicit ``asset`` field
+    were written before the multi-asset refactor and default to BTC.
+    """
+    if asset is None:
+        asset = selected_asset()
+    if asset is None:
+        return records
+    return [r for r in records if r.get("asset", "BTC") == asset]
+
+
+def configured_asset_names() -> list[str]:
+    """Names of assets enabled in config — used to populate the sidebar filter."""
+    cfg = load_config()
+    return [
+        name for name, body in (cfg.get("assets") or {}).items()
+        if body.get("enabled", True)
+    ]
+
+
+def strip_slug_prefix(slug: str) -> str:
+    """Strip a known asset slug prefix (`btc-updown-5m-`, `eth-updown-5m-`,
+    or whatever's in config) so the timestamp tail is human-readable.
+    """
+    cfg = load_config()
+    for body in (cfg.get("assets") or {}).values():
+        prefix = body.get("slug_prefix", "")
+        if prefix and slug.startswith(prefix + "-"):
+            return slug[len(prefix) + 1:]
+    return slug
+
+
 def render_sidebar() -> None:
     """Render the persistent sidebar: status, HALT toggle, last eval, balance."""
     halt_path = get_halt_path()
@@ -295,6 +346,19 @@ def render_sidebar() -> None:
                 st.cache_data.clear()
                 st.rerun()
             st.caption("Takes effect after the current slot.")
+
+        # Asset filter — only render when more than one asset is configured.
+        asset_names = configured_asset_names()
+        if len(asset_names) > 1:
+            st.markdown("---")
+            options = [_ASSET_FILTER_ALL] + asset_names
+            current = st.session_state.get(_ASSET_FILTER_KEY, _ASSET_FILTER_ALL)
+            if current not in options:
+                current = _ASSET_FILTER_ALL
+            st.selectbox(
+                "Asset", options, index=options.index(current),
+                key=_ASSET_FILTER_KEY,
+            )
 
         st.markdown("---")
 

@@ -12,11 +12,12 @@ from polybot.client.clob import CLOBClient
 from polybot.execution.entry import execute_entry
 from polybot.execution.exit import monitor_position
 from polybot.feeds.binance_futures import fetch_futures_snapshot
-from polybot.feeds.btc_price import fetch_btc_prices
 from polybot.feeds.chainlink import fetch_chainlink_round
 from polybot.feeds.macro import fetch_macro_snapshot
 from polybot.feeds.orderbook_ws import OrderBookWS
-from polybot.models.btc_market import Direction, ExitReason, SlotInfo
+from polybot.feeds.spot_price import fetch_spot_prices
+from polybot.models.asset import AssetSpec
+from polybot.models.market import Direction, ExitReason, SlotInfo
 from polybot.monitoring.tracker import PositionTracker
 from polybot.signals.combiner import should_trade
 
@@ -32,17 +33,21 @@ class LifecycleState(str, Enum):
 
 
 class MarketLifecycle:
-    """Manages one 5-minute BTC market slot from open to resolution."""
+    """Manages one 5-minute Polymarket slot for a single asset, from open to
+    resolution.
+    """
 
     def __init__(
         self,
         slot: SlotInfo,
+        asset: AssetSpec,
         clob: CLOBClient,
         tracker: PositionTracker,
         dry_run: bool,
         config: dict,
     ) -> None:
         self.slot = slot
+        self.asset = asset
         self._clob = clob
         self._tracker = tracker
         self._dry_run = dry_run
@@ -81,10 +86,10 @@ class MarketLifecycle:
             try:
                 await self._book_ws.wait_ready(timeout=15.0)
             except asyncio.TimeoutError:
-                logger.warning("orderbook_not_ready", slug=self.slot.slug)
+                logger.warning("orderbook_not_ready", slug=self.slot.slug, asset=self.asset.name)
 
             if self.slot.price_to_beat == 0:
-                logger.warning("no_price_to_beat", slug=self.slot.slug)
+                logger.warning("no_price_to_beat", slug=self.slot.slug, asset=self.asset.name)
                 self._state = LifecycleState.RESOLVED
                 return
 
@@ -93,7 +98,7 @@ class MarketLifecycle:
         except asyncio.CancelledError:
             self._state = LifecycleState.STOPPING
         except Exception as e:
-            logger.error("lifecycle_error", slug=self.slot.slug, error=str(e))
+            logger.error("lifecycle_error", slug=self.slot.slug, asset=self.asset.name, error=str(e))
             self._state = LifecycleState.RESOLVED
         finally:
             self._book_ws.destroy()
@@ -111,15 +116,17 @@ class MarketLifecycle:
 
         elapsed = time.time() - slot_start_sec
         if elapsed > window_end or self.remaining_secs <= 0:
-            logger.info("entry_window_skipped", slug=self.slot.slug, elapsed=round(elapsed))
+            logger.info("entry_window_skipped", slug=self.slot.slug, asset=self.asset.name, elapsed=round(elapsed))
             self._state = LifecycleState.RESOLVED
             return
 
         signals_cfg = self._config.get("strategy", {}).get("signals", {})
         chainlink_cfg = signals_cfg.get("chainlink", {})
         chainlink_enabled = bool(chainlink_cfg.get("enabled", True))
-        rpc_url = chainlink_cfg.get("rpc_url")
-        aggregator = chainlink_cfg.get("aggregator_address")
+        # Per-asset addresses on AssetSpec take precedence; the strategy.signals
+        # block is kept as a fallback for compatibility with the legacy config.
+        rpc_url = self.asset.chainlink_rpc_url or chainlink_cfg.get("rpc_url")
+        aggregator = self.asset.chainlink_aggregator or chainlink_cfg.get("aggregator_address")
 
         chainlink_task = (
             asyncio.create_task(
@@ -133,7 +140,7 @@ class MarketLifecycle:
 
         futures_cfg = signals_cfg.get("futures", {})
         futures_enabled = bool(futures_cfg.get("enabled", True))
-        futures_url = futures_cfg.get("url")
+        futures_url = self.asset.futures_url or futures_cfg.get("url")
         futures_task = (
             asyncio.create_task(
                 fetch_futures_snapshot(url=futures_url)
@@ -150,9 +157,9 @@ class MarketLifecycle:
             asyncio.create_task(fetch_macro_snapshot()) if macro_enabled else None
         )
 
-        prices = await fetch_btc_prices()
+        prices = await fetch_spot_prices(self.asset.spot_urls, asset_name=self.asset.name)
         if prices is None:
-            logger.warning("price_unavailable", slug=self.slot.slug)
+            logger.warning("price_unavailable", slug=self.slot.slug, asset=self.asset.name)
             if chainlink_task:
                 chainlink_task.cancel()
             if futures_task:
@@ -178,17 +185,42 @@ class MarketLifecycle:
             slot=self.slot,
             bankroll=bankroll,
             config=self._config.get("strategy", {}),
+            asset=self.asset,
             chainlink=chainlink,
             futures=futures,
             macro=macro,
         )
 
         if signal is None:
-            logger.info("window_skipped_no_signal", slug=self.slot.slug)
+            logger.info("window_skipped_no_signal", slug=self.slot.slug, asset=self.asset.name)
             self._state = LifecycleState.RESOLVED
             return
 
         signal_ts = time.time()
+
+        # Eval-only mode: signal was evaluated and logged via the combiner,
+        # but we don't place an order. Used during the canary period for a
+        # new asset before flipping to live trading.
+        if self.asset.eval_only:
+            from polybot.monitoring.event_log import emit_execution
+            logger.info(
+                "eval_only_skipping_order",
+                slug=self.slot.slug, asset=self.asset.name,
+                direction=signal.direction.value,
+                confidence=signal.confidence,
+                size_usdc=round(signal.size_usdc, 2),
+            )
+            emit_execution(
+                slug=self.slot.slug,
+                asset=self.asset.name,
+                status="blocked",
+                block_reason="eval_only",
+                direction=signal.direction.value,
+                confidence=signal.confidence,
+                size_usdc=round(signal.size_usdc, 2),
+            )
+            self._state = LifecycleState.RESOLVED
+            return
 
         # Re-fetch live balance immediately before placing order
         invalidate_cache()
@@ -200,12 +232,14 @@ class MarketLifecycle:
             logger.warning(
                 "insufficient_balance",
                 slug=self.slot.slug,
+                asset=self.asset.name,
                 balance=round(live_balance, 2),
                 required=min_usdc,
             )
             from polybot.monitoring.event_log import emit_execution
             emit_execution(
                 slug=self.slot.slug,
+                asset=self.asset.name,
                 status="blocked",
                 block_reason="insufficient_balance",
                 direction=signal.direction.value,
@@ -259,12 +293,14 @@ class MarketLifecycle:
             logger.info(
                 "trade_closed",
                 slug=self.slot.slug,
+                asset=self.asset.name,
                 reason=result.reason.value,
                 pnl=pnl_str,
             )
             from polybot.monitoring.event_log import emit_result
             emit_result(
                 slug=self.slot.slug,
+                asset=self.asset.name,
                 exit_reason=result.reason.value,
                 exit_price=result.exit_price,
                 pnl=result.pnl,
@@ -292,6 +328,7 @@ class MarketLifecycle:
                     self.pnl = outcome["pnl"]
                     emit_result(
                         slug=self.slot.slug,
+                        asset=self.asset.name,
                         won=outcome["won"],
                         pnl=outcome["pnl"],
                         shares=outcome["shares"],
@@ -305,6 +342,7 @@ class MarketLifecycle:
                     logger.info(
                         "trade_resolved",
                         slug=self.slot.slug,
+                        asset=self.asset.name,
                         won=outcome["won"],
                         pnl=f"{'+' if outcome['pnl'] >= 0 else ''}{outcome['pnl']:.2f}",
                     )
@@ -324,6 +362,7 @@ class MarketLifecycle:
                             self.pnl = outcome["pnl"]
                             emit_result(
                                 slug=self.slot.slug,
+                                asset=self.asset.name,
                                 won=outcome["won"],
                                 pnl=outcome["pnl"],
                                 shares=outcome["shares"],
@@ -337,6 +376,7 @@ class MarketLifecycle:
                             logger.info(
                                 "trade_resolved_fallback",
                                 slug=self.slot.slug,
+                                asset=self.asset.name,
                                 won=outcome["won"],
                                 pnl=f"{'+' if outcome['pnl'] >= 0 else ''}{outcome['pnl']:.2f}",
                             )
@@ -347,6 +387,7 @@ class MarketLifecycle:
                     logger.warning(
                         "outcome_api_lag",
                         slug=self.slot.slug,
+                        asset=self.asset.name,
                         attempt=_attempt + 1,
                         retry_in=wait,
                     )

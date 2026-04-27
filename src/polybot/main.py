@@ -7,7 +7,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-app = typer.Typer(name="polybot", help="BTC 5-minute Polymarket signal engine")
+app = typer.Typer(name="polybot", help="Polymarket 5-minute multi-asset signal engine")
 console = Console()
 
 
@@ -20,7 +20,7 @@ def setup():
 
 @app.command()
 def run(config: str = typer.Option("config/default.yaml", help="Path to config file")):
-    """Start the 5-minute BTC engine (honours dry_run in config)."""
+    """Start the 5-minute multi-asset engine (honours dry_run in config)."""
     from polybot.bot import build_engine
     engine = build_engine(config)
     asyncio.run(engine.run())

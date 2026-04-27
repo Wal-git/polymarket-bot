@@ -18,7 +18,12 @@ def _to_pdt(iso: str) -> str:
 
 st.set_page_config(page_title="History — POLYBOT", page_icon="◇", layout="wide")
 
-from polybot.dashboard.data_loader import inject_styles, load_evaluations, render_sidebar  # noqa: E402
+from polybot.dashboard.data_loader import (  # noqa: E402
+    apply_asset_filter,
+    inject_styles,
+    load_evaluations,
+    render_sidebar,
+)
 
 inject_styles()
 st_autorefresh(interval=15_000, key="history_refresh")
@@ -27,7 +32,7 @@ render_sidebar()
 st.markdown('<div class="page-header">◇ SLOT HISTORY</div>', unsafe_allow_html=True)
 
 last_n = st.number_input("Show last N evaluations", min_value=10, max_value=1000, value=100, step=10)
-evals = load_evaluations(last_n=int(last_n))
+evals = apply_asset_filter(load_evaluations(last_n=int(last_n)))
 
 if not evals:
     st.info("No evaluations recorded yet.")
@@ -79,6 +84,7 @@ else:
         result = "TRADE" if e.get("confluence") else reject.replace("_", " ").upper()
         rows.append({
             "Time": _to_pdt(e.get("ts") or ""),
+            "Asset": e.get("asset") or "BTC",
             "Slot": (e.get("slug") or "")[-10:],
             "P-T-B": f"${float(e.get('price_to_beat') or 0):,.0f}",
             "Binance Δ": f"{float(e.get('binance_delta') or 0):+.0f}",
