@@ -26,6 +26,7 @@ from polybot.dashboard.data_loader import (  # noqa: E402
     load_config,
     load_evaluations,
     load_state,
+    render_exchange_tiles,
     render_sidebar,
 )
 
@@ -154,10 +155,6 @@ else:
     ts = (last_eval.get("ts") or "")[:19].replace("T", " ")
     slug = last_eval.get("slug", "")
     ptb = last_eval.get("price_to_beat", 0)
-    binance = last_eval.get("binance", 0)
-    coinbase = last_eval.get("coinbase", 0)
-    b_delta = last_eval.get("binance_delta", 0)
-    c_delta = last_eval.get("coinbase_delta", 0)
     div_dir = last_eval.get("div_direction")
     imb_dir = last_eval.get("imb_direction")
     imb_ratio = last_eval.get("imbalance_ratio")
@@ -178,20 +175,11 @@ else:
             <span style="font-family:'Inter',sans-serif;font-size:0.8rem;font-weight:700;color:{result_color};background:rgba(0,0,0,0.2);padding:0.25rem 0.6rem;border-radius:3px;">{result_label}</span>
         </div>
         <div style="font-family:'Inter',sans-serif;font-size:0.7rem;color:#848E9C;margin-bottom:0.6rem;">{ts}</div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.5rem;margin-bottom:0.75rem;">
+        <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:0.4rem;margin-bottom:0.75rem;">
+            {render_exchange_tiles(last_eval)}
             <div style="background:rgba(0,0,0,0.15);padding:0.5rem;border-radius:3px;">
-                <div style="font-size:0.65rem;color:#848E9C;text-transform:uppercase;letter-spacing:0.08em;">Binance</div>
-                <div style="font-family:'Barlow Condensed',sans-serif;font-size:1.1rem;color:#EAECEF;">${binance:,.2f}</div>
-                <div style="font-size:0.75rem;color:{'#0ECB81' if b_delta > 0 else '#F6465D'};">{b_delta:+.2f}</div>
-            </div>
-            <div style="background:rgba(0,0,0,0.15);padding:0.5rem;border-radius:3px;">
-                <div style="font-size:0.65rem;color:#848E9C;text-transform:uppercase;letter-spacing:0.08em;">Coinbase</div>
-                <div style="font-family:'Barlow Condensed',sans-serif;font-size:1.1rem;color:#EAECEF;">${coinbase:,.2f}</div>
-                <div style="font-size:0.75rem;color:{'#0ECB81' if c_delta > 0 else '#F6465D'};">{c_delta:+.2f}</div>
-            </div>
-            <div style="background:rgba(0,0,0,0.15);padding:0.5rem;border-radius:3px;">
-                <div style="font-size:0.65rem;color:#848E9C;text-transform:uppercase;letter-spacing:0.08em;">Price to Beat</div>
-                <div style="font-family:'Barlow Condensed',sans-serif;font-size:1.1rem;color:#F0B90B;">${ptb:,.2f}</div>
+                <div style="font-size:0.65rem;color:#848E9C;text-transform:uppercase;letter-spacing:0.08em;">P-T-B</div>
+                <div style="font-family:'Barlow Condensed',sans-serif;font-size:1rem;color:#F0B90B;">${ptb:,.2f}</div>
             </div>
         </div>
         <div style="display:flex;gap:1rem;font-family:'Inter',sans-serif;font-size:0.82rem;">
