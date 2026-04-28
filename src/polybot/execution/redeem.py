@@ -176,3 +176,116 @@ def maybe_redeem(private_key: str, clob_client) -> tuple[int, list[dict]]:
     except Exception as e:
         logger.warning("redeem_skipped", error=str(e))
         return 0, []
+
+
+_GAMMA_BASE = "https://gamma-api.polymarket.com"
+
+
+def _outcome_from_prices(prices) -> Optional[str]:
+    """Map gamma-api outcomePrices to UP/DOWN. None when unresolved/pushed."""
+    import json as _json
+    if isinstance(prices, str):
+        try:
+            prices = _json.loads(prices)
+        except _json.JSONDecodeError:
+            return None
+    if not isinstance(prices, list) or len(prices) != 2:
+        return None
+    try:
+        a, b = float(prices[0]), float(prices[1])
+    except (TypeError, ValueError):
+        return None
+    if a == 1 and b == 0:
+        return "UP"
+    if a == 0 and b == 1:
+        return "DOWN"
+    return None
+
+
+def reconcile_resolved_positions(tracker, grace_secs: int = 300) -> int:
+    """Clean up state for positions whose slot has already resolved.
+
+    The on-chain redeem flow only processes ``redeemable=true`` positions, which
+    excludes losses (nothing to claim on-chain when shares = $0). Without a
+    second cleanup path, lost positions accumulate in ``state.json`` forever
+    after any bot restart that interrupted ``lifecycle.close_position``.
+
+    For each tracked position whose slot end + ``grace_secs`` is in the past,
+    query gamma-api for resolution. If resolved, ``emit_result`` (dedup'd by
+    slug) and ``close_position``. Returns the number of positions cleaned.
+    """
+    from polybot.monitoring.event_log import emit_result
+    from datetime import datetime, timezone
+
+    now_ts = datetime.now(timezone.utc).timestamp()
+    candidates = []
+    for pos in tracker.positions:
+        slug = pos.market_question
+        try:
+            slot_ts = int(slug.split("-")[-1])
+        except (ValueError, AttributeError):
+            continue
+        if not slug.startswith(("btc-updown-5m-", "eth-updown-5m-")):
+            continue
+        # 5-min slots: open at slot_ts, close at slot_ts + 300
+        slot_close_ts = slot_ts + 300
+        if slot_close_ts + grace_secs > now_ts:
+            continue  # too soon, let the slot finish + propagate
+        candidates.append((slug, pos))
+
+    if not candidates:
+        return 0
+
+    # Batch query gamma-api: it accepts repeated &slug= params (verified in
+    # scripts/backfill_slot_history.py). 100 per batch is safe.
+    cleaned = 0
+    BATCH = 100
+    for i in range(0, len(candidates), BATCH):
+        batch = candidates[i : i + BATCH]
+        slugs = [s for s, _ in batch]
+        try:
+            resp = httpx.get(
+                f"{_GAMMA_BASE}/markets",
+                params=[("slug", s) for s in slugs] + [("closed", "true"), ("limit", str(len(slugs) * 2))],
+                timeout=15,
+            )
+            resp.raise_for_status()
+            markets = {m.get("slug"): m for m in resp.json() if m.get("slug")}
+        except Exception as e:
+            logger.warning("reconcile_fetch_failed", error=str(e), batch_size=len(batch))
+            continue
+
+        for slug, pos in batch:
+            m = markets.get(slug)
+            if m is None:
+                continue  # not yet in API as closed; try next cycle
+            outcome = _outcome_from_prices(m.get("outcomePrices"))
+            if outcome is None:
+                continue  # unresolved or pushed; try next cycle
+            won = (pos.outcome_label.upper() == outcome)
+            shares = float(pos.shares)
+            entry = float(pos.avg_entry_price)
+            pnl = round(shares * (1.0 - entry), 4) if won else round(-shares * entry, 4)
+            emit_result(
+                slug=slug,
+                won=won,
+                pnl=pnl,
+                shares=shares,
+                entry_price=entry,
+                exit_reason="HOLD_TO_RESOLUTION",
+                exit_price=1.0 if won else 0.0,
+                confidence=pos.confidence,
+            )
+            tracker.close_position(pos.token_id)
+            cleaned += 1
+            logger.info(
+                "stale_position_reconciled",
+                slug=slug,
+                won=won,
+                pnl=pnl,
+                age_h=round((now_ts - (int(slug.split('-')[-1]) + 300)) / 3600, 1),
+            )
+
+    if cleaned:
+        tracker.save()
+    return cleaned

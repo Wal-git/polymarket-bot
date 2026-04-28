@@ -86,11 +86,19 @@ def should_trade(
             _per_exchange_diag[name] = None
             _per_exchange_diag[f"{name}_delta"] = None
 
+    # Capture best_ask for both sides upfront so every evaluation row records
+    # the orderbook entry price — needed for the entry-price gate below and for
+    # offline analysis of slots that didn't fire.
+    up_best_ask = book_ws.best_ask(Direction.UP)
+    down_best_ask = book_ws.best_ask(Direction.DOWN)
+
     _base = dict(
         slug=slot.slug,
         asset=asset.name if asset is not None else None,
         price_to_beat=slot.price_to_beat,
         sources_available=len(available),
+        up_best_ask=round(up_best_ask, 4) if up_best_ask is not None else None,
+        down_best_ask=round(down_best_ask, 4) if down_best_ask is not None else None,
         **_per_exchange_diag,
     )
 
@@ -257,6 +265,39 @@ def should_trade(
     snapshot = book_ws.get_snapshot(token_id)
     imbalance = calculate_imbalance(snapshot, depth=depth)
     entry_price = book_ws.best_ask(direction) or 0.5
+
+    # Entry-price gate: skip trades where the orderbook isn't already strongly
+    # consensus on our side. Empirically (~50 trade sample), entry_price is the
+    # single biggest driver of EV — slots with best_ask < 0.80 were heavy net
+    # losers despite a 73% raw win rate. Defaults of 0 disable both gates.
+    min_entry_price = float(siz_cfg.get("min_entry_price", 0.0))
+    max_entry_price = float(siz_cfg.get("max_entry_price", 0.0))
+    if min_entry_price > 0 and entry_price < min_entry_price:
+        logger.debug("entry_price_below_floor", slug=slot.slug,
+                     entry_price=round(entry_price, 4), floor=min_entry_price)
+        _emit(
+            div_direction=direction.value,
+            imb_direction=imb_direction.value if imb_direction else None,
+            snapshot_imbalance=round(imbalance, 3),
+            confluence=False, fast_pass=fast_pass_triggered,
+            confidence=None, size_usdc=None, direction=None,
+            best_ask=round(entry_price, 4),
+            reject_reason="entry_price_too_low",
+        )
+        return None
+    if max_entry_price > 0 and entry_price > max_entry_price:
+        logger.debug("entry_price_above_ceiling", slug=slot.slug,
+                     entry_price=round(entry_price, 4), ceiling=max_entry_price)
+        _emit(
+            div_direction=direction.value,
+            imb_direction=imb_direction.value if imb_direction else None,
+            snapshot_imbalance=round(imbalance, 3),
+            confluence=False, fast_pass=fast_pass_triggered,
+            confidence=None, size_usdc=None, direction=None,
+            best_ask=round(entry_price, 4),
+            reject_reason="entry_price_too_high",
+        )
+        return None
 
     # Confidence — calibrated lookup if enabled and table available, else formula.
     mean_abs_delta = sum(abs_deltas) / len(abs_deltas)

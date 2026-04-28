@@ -505,3 +505,88 @@ class TestShouldTrade:
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=cfg)
         if result:
             assert result.confidence <= 0.95
+
+
+class TestEntryPriceGate:
+    def _cfg(self, *, min_entry_price=0.0, max_entry_price=0.0):
+        return {
+            "signals": {
+                "divergence": {"min_gap_usd": 100.0, "max_gap_usd": 0.0, "fast_pass_usd": 125.0},
+                "imbalance": {
+                    "buy_threshold": 1.8, "sell_threshold": 0.55,
+                    "detection_window_seconds": [30, 90], "depth_levels": 10,
+                },
+            },
+            "sizing": {
+                "kelly_fraction": 0.25, "min_trade_usdc": 10, "max_trade_usdc": 200,
+                "min_entry_price": min_entry_price,
+                "max_entry_price": max_entry_price,
+            },
+        }
+
+    def test_min_entry_price_blocks_low_orderbook_consensus(self):
+        # Divergence fires (both exchanges +120 over PTB), but best_ask=0.55 — book hasn't
+        # repriced enough to clear the entry-price floor. Must reject.
+        prices = _prices(95_120, 95_110)
+        ws = _mock_book_ws(best_ask=0.55, imbalance_ratio=2.0, secs=60.0)
+        result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0,
+                              config=self._cfg(min_entry_price=0.80))
+        assert result is None
+
+    def test_min_entry_price_allows_high_orderbook_consensus(self):
+        # Same divergence but best_ask=0.85 — book confirms, signal fires.
+        prices = _prices(95_120, 95_110)
+        ws = _mock_book_ws(best_ask=0.85, imbalance_ratio=2.0, secs=60.0)
+        result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0,
+                              config=self._cfg(min_entry_price=0.80))
+        assert isinstance(result, TradeSignal)
+        assert result.direction == Direction.UP
+
+    def test_max_entry_price_blocks_near_certainty(self):
+        # best_ask=0.97 — payoff (1-p)/p ≈ 0.031, too small to recoup occasional losses.
+        prices = _prices(95_120, 95_110)
+        ws = _mock_book_ws(best_ask=0.97, imbalance_ratio=2.0, secs=60.0)
+        result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0,
+                              config=self._cfg(min_entry_price=0.80, max_entry_price=0.95))
+        assert result is None
+
+    def test_gates_disabled_when_zero(self):
+        # min_entry_price=0 (default) leaves the existing behavior untouched.
+        prices = _prices(95_120, 95_110)
+        ws = _mock_book_ws(best_ask=0.52, imbalance_ratio=2.0, secs=60.0)
+        result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=self._cfg())
+        assert isinstance(result, TradeSignal)
+
+    def test_gate_emits_reject_reason(self, tmp_path, monkeypatch):
+        # The eval row for a blocked trade must record reject_reason and best_ask.
+        import json
+        from polybot.monitoring import event_log as el
+        monkeypatch.setattr(el, "_DEFAULT_EVALS", tmp_path / "evals.jsonl")
+
+        prices = _prices(95_120, 95_110)
+        ws = _mock_book_ws(best_ask=0.60, imbalance_ratio=2.0, secs=60.0)
+        result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0,
+                              config=self._cfg(min_entry_price=0.80))
+        assert result is None
+
+        evals = [json.loads(l) for l in (tmp_path / "evals.jsonl").read_text().splitlines()]
+        assert evals[-1]["reject_reason"] == "entry_price_too_low"
+        assert evals[-1]["best_ask"] == 0.60
+        assert evals[-1]["up_best_ask"] == 0.60
+
+    def test_best_ask_logged_on_no_divergence_eval(self, tmp_path, monkeypatch):
+        # Even when no signal fires, up_best_ask/down_best_ask must be in the eval row
+        # so we can analyze entry-price distributions on non-firing slots.
+        import json
+        from polybot.monitoring import event_log as el
+        monkeypatch.setattr(el, "_DEFAULT_EVALS", tmp_path / "evals.jsonl")
+
+        prices = _prices(95_010, 95_020)  # only $10/$20, well below min_gap
+        ws = _mock_book_ws(best_ask=0.51, imbalance_ratio=1.0, secs=60.0)
+        result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=self._cfg())
+        assert result is None
+
+        evals = [json.loads(l) for l in (tmp_path / "evals.jsonl").read_text().splitlines()]
+        assert evals[-1]["reject_reason"] == "no_divergence"
+        assert evals[-1]["up_best_ask"] == 0.51
+        assert evals[-1]["down_best_ask"] == 0.51
