@@ -10,7 +10,7 @@ from polybot.auth.wallet import get_private_key
 from polybot.client.clob import CLOBClient
 from polybot.engine.discovery import fetch_slot_details, get_slug, get_slot_ts
 from polybot.engine.lifecycle import LifecycleState, MarketLifecycle
-from polybot.execution.redeem import maybe_redeem
+from polybot.execution.redeem import maybe_redeem, reconcile_resolved_positions
 from polybot.models.asset import AssetSpec
 from polybot.monitoring.tracker import PositionTracker
 
@@ -78,6 +78,16 @@ class MultiAssetEngine:
                     confidence=slug_confidence.get(outcome["slug"]),
                     asset=_asset_from_slug(outcome["slug"], self._assets),
                 )
+        # Reconcile stale losses (and any winners the on-chain flow missed).
+        # _fetch_redeemable filters to redeemable=true, which excludes losses;
+        # without this pass, lost positions left over from interrupted lifecycles
+        # accumulate in state.json indefinitely.
+        try:
+            stale_cleaned = reconcile_resolved_positions(self._tracker)
+            if stale_cleaned:
+                logger.info("stale_positions_reconciled", count=stale_cleaned)
+        except Exception as e:
+            logger.warning("reconcile_skipped", error=str(e))
 
     async def run(self) -> None:
         self._running = True

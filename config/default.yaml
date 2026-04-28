@@ -69,7 +69,12 @@ strategy:
       max_gap_usd: 0.0              # Off (0 = disabled) — was 200.0; previously rejected over-extended divergences
       fast_pass_enabled: false      # Off — only fire via N-of-M agreement, not single-exchange spikes
       fast_pass_usd: 125.0          # (unused while fast_pass_enabled=false)
-      min_agreement: 3              # N-of-M exchanges must agree past min_gap (3-of-5 default)
+      min_agreement: 2              # N-of-M exchanges must agree past min_gap; was 3, lowered 2026-04-28
+                                    # because 5-exchange data only started 2026-04-27 (~17h history),
+                                    # so 3-of-5 fired ≈2/day. Historical 1252-slot analysis showed
+                                    # 2-of-N at gap=100 yields ~84% direction accuracy and 0 vetoes
+                                    # from hard-dissent (no exchange ever moves past −min_gap when
+                                    # others are past +min_gap at this threshold).
       require_chainlink_gap: true
     imbalance:
       buy_threshold: 1.8            # retained for data capture only — not used as a trade gate
@@ -108,6 +113,10 @@ strategy:
     min_trade_usdc: 30
     max_trade_usdc: 200
     min_confidence: 0.80            # reject trades below this confidence
+    min_entry_price: 0.80           # reject trades when orderbook YES isn't already 0.80+;
+                                    # see scripts/backfill_slot_history.py + analysis 2026-04-28
+                                    # for derivation. Set to 0 to disable.
+    max_entry_price: 0.95           # reject trades above this — payoff (1-p)/p too small to recoup losses
     double_min_above_usd: 200.0     # either exchange delta >= this → double the minimum bet
 
   bankroll:
