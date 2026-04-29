@@ -33,6 +33,8 @@ class AssetThresholds:
     deep_gap_min_entry: Optional[float] = None
     min_confidence: Optional[float] = None
     min_agreement: Optional[int] = None
+    min_trade_usdc: Optional[float] = None
+    max_trade_usdc: Optional[float] = None
 
 
 @dataclass(frozen=True)
