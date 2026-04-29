@@ -32,8 +32,7 @@ assets:
     # Polymarket lists 5-min ETH up/down markets on the same grid as BTC.
     # Verified 2026-04-27: slug prefix `eth-updown-5m`, same slot anchor.
     enabled: true
-    eval_only: true                   # log signals, do not place orders
-                                      # Flip to false once threshold tuning is validated.
+    eval_only: false                  # live trading enabled 2026-04-29
     slug_prefix: "eth-updown-5m"
     slot_base_timestamp: 1772568900   # same 5-min grid as BTC (verified)
     slot_interval_s: 300
@@ -47,14 +46,19 @@ assets:
     chainlink_aggregator: "0xF9680D99D6C9589e2a93a78A04A279e509205945"  # Polygon ETH/USD
     chainlink_rpc_url: "https://1rpc.io/matic"
     calibration_table_path: "data/calibration_table_eth.json"
-    # USD-denominated thresholds scaled for ETH price level (~$2.3k vs BTC ~$80k).
-    # Eyeballed at strategy_defaults / 33 (price ratio); refine after observing
-    # ~1 week of evaluations.jsonl for ETH and matching BTC's ~15% slot-fire rate.
+    # USD-denominated thresholds derived from 46-hour eval analysis (2026-04-29).
+    # min_gap lowered from 5.0 → 1.5 (ETH p95 delta is only $4, so 5.0 fires 0%).
+    # deep_gap_usd: when mean exchange delta ≥ $2.5, allow entry as low as 0.50
+    # (high-conviction divergence + cheap market price = large upside).
+    # The global min_entry_price (0.80) applies when deep_gap does not fire.
     thresholds:
-      min_gap_usd: 5.0                # was 100 for BTC
-      max_gap_usd: 0.0                # disabled, same as BTC
+      min_gap_usd: 1.5                # 46h analysis: 88.9% accuracy at 5-agree/$1.5
+      max_gap_usd: 0.0                # disabled
       fast_pass_usd: 10.0             # unused while fast_pass_enabled=false
       double_min_above_usd: 10.0      # was 200 for BTC
+      deep_gap_usd: 2.5               # mean delta ≥ $2.5 → use deep_gap_min_entry floor
+      deep_gap_min_entry: 0.50        # allow entry down to 0.50 on high-conviction moves
+      min_agreement: 5                # ALL 5 exchanges must agree — 88.9% accuracy vs 77.8% at 2
 
 strategy:
   name: btc_5min

@@ -24,7 +24,7 @@ _BOT_LOG_FILE = Path("data/bot.log")
 _BALANCE_FILE = Path("data/balance.json")
 _CONFIG_FILE = Path("config/default.yaml")
 
-STARTING_BALANCE = 275.0
+STARTING_BALANCE = 261.32
 
 
 @st.cache_data(ttl=5)

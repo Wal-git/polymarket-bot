@@ -26,6 +26,13 @@ class AssetThresholds:
     fast_pass_usd: Optional[float] = None
     double_min_above_usd: Optional[float] = None
     delta_buckets: Optional[tuple[float, ...]] = None  # USD-denominated calibration bucket edges
+    # Tiered entry-price floor: when mean exchange delta >= deep_gap_usd, use
+    # deep_gap_min_entry as the floor instead of the normal min_entry_price.
+    # Lets high-conviction divergences trade at lower market prices (higher upside).
+    deep_gap_usd: Optional[float] = None
+    deep_gap_min_entry: Optional[float] = None
+    min_confidence: Optional[float] = None
+    min_agreement: Optional[int] = None
 
 
 @dataclass(frozen=True)
