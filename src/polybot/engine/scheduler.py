@@ -39,6 +39,7 @@ class MultiAssetEngine:
         assets: list[AssetSpec],
         halt_file: str = "./HALT",
         daily_loss_limit: float = 100.0,
+        config_path: str = "config/default.yaml",
     ) -> None:
         if not assets:
             raise ValueError("MultiAssetEngine requires at least one AssetSpec")
@@ -46,12 +47,34 @@ class MultiAssetEngine:
         self._tracker = tracker
         self._dry_run = dry_run
         self._config = config
-        self._assets = assets
+        self._assets = list(assets)
         self._halt_file = Path(halt_file)
         self._daily_loss_limit = daily_loss_limit
         self._daily_pnl = 0.0
         self._trades_today = 0
         self._running = False
+        self._config_path = config_path
+
+    def _reset_one_off_thresholds(self, asset_name: str) -> None:
+        """Clear min_trade_usdc / max_trade_usdc overrides from the named asset
+        after its first live fill, both in memory and in the config file.
+        """
+        from dataclasses import replace
+        from polybot.bot import strip_one_off_thresholds
+
+        keys = ("min_trade_usdc", "max_trade_usdc")
+        for i, a in enumerate(self._assets):
+            if a.name != asset_name:
+                continue
+            t = a.thresholds
+            if t.min_trade_usdc is None and t.max_trade_usdc is None:
+                return  # nothing to reset
+            new_thresholds = replace(t, min_trade_usdc=None, max_trade_usdc=None)
+            self._assets[i] = replace(a, thresholds=new_thresholds)
+            logger.info("one_off_thresholds_reset", asset=asset_name)
+            break
+
+        strip_one_off_thresholds(self._config_path, asset_name, list(keys))
 
     def _run_redeem(self) -> None:
         """Redeem any resolved positions and sync CLOB balance."""
@@ -165,6 +188,7 @@ class MultiAssetEngine:
                             tracker=self._tracker,
                             dry_run=self._dry_run,
                             config=self._config,
+                            on_fill=lambda a=asset: self._reset_one_off_thresholds(a.name),
                         )
                         active[current_slug] = lc
                         attempted[asset.name].add(current_slug)
@@ -190,6 +214,7 @@ class MultiAssetEngine:
                             tracker=self._tracker,
                             dry_run=self._dry_run,
                             config=self._config,
+                            on_fill=lambda a=asset: self._reset_one_off_thresholds(a.name),
                         )
                         active[next_slug] = lc
                         attempted[asset.name].add(next_slug)

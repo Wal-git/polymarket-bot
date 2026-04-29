@@ -69,6 +69,8 @@ def _build_asset_specs(config: dict) -> list[AssetSpec]:
                     deep_gap_min_entry=thresholds_block.get("deep_gap_min_entry"),
                     min_confidence=thresholds_block.get("min_confidence"),
                     min_agreement=thresholds_block.get("min_agreement"),
+                    min_trade_usdc=thresholds_block.get("min_trade_usdc"),
+                    max_trade_usdc=thresholds_block.get("max_trade_usdc"),
                 ),
             )
         )
@@ -91,6 +93,49 @@ def _btc_default_spec() -> AssetSpec:
     )
 
 
+def strip_one_off_thresholds(config_path: str, asset_name: str, keys: list[str]) -> None:
+    """Remove specific threshold keys from an asset's thresholds block in the
+    YAML config file without disturbing comments or other content.
+
+    Uses a simple indent-aware state machine so it only removes lines inside
+    assets.<asset_name>.thresholds, not same-named keys elsewhere (e.g.
+    strategy.sizing.min_trade_usdc).
+    """
+    path = Path(config_path)
+    lines = path.read_text().splitlines(keepends=True)
+
+    in_assets = False
+    in_target_asset = False
+    in_thresholds = False
+    result: list[str] = []
+
+    for line in lines:
+        stripped = line.lstrip()
+        # Blank lines and comment-only lines don't change block state
+        if not stripped or stripped.startswith("#"):
+            result.append(line)
+            continue
+
+        indent = len(line) - len(stripped)
+        key_part = stripped.split(":")[0].strip()
+
+        if indent == 0:
+            in_assets = key_part == "assets"
+            in_target_asset = False
+            in_thresholds = False
+        elif in_assets and indent == 2:
+            in_target_asset = key_part == asset_name
+            in_thresholds = False
+        elif in_target_asset and indent == 4:
+            in_thresholds = key_part == "thresholds"
+        elif in_thresholds and indent == 6 and key_part in keys:
+            continue  # drop this line
+
+        result.append(line)
+
+    path.write_text("".join(result))
+
+
 def build_engine(config_path: str = "config/default.yaml") -> MultiAssetEngine:
     config = load_config(config_path)
     bot_cfg = config.get("bot", {})
@@ -111,4 +156,5 @@ def build_engine(config_path: str = "config/default.yaml") -> MultiAssetEngine:
         assets=_build_asset_specs(config),
         halt_file=bot_cfg.get("halt_file", "./HALT"),
         daily_loss_limit=float(risk_cfg.get("daily_loss_limit_usdc", 100.0)),
+        config_path=config_path,
     )

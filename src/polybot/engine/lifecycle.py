@@ -2,7 +2,7 @@ import asyncio
 import time
 from decimal import Decimal
 from enum import Enum
-from typing import Optional
+from typing import Callable, Optional
 
 import structlog
 from web3 import Web3
@@ -45,6 +45,7 @@ class MarketLifecycle:
         tracker: PositionTracker,
         dry_run: bool,
         config: dict,
+        on_fill: Optional[Callable[[], None]] = None,
     ) -> None:
         self.slot = slot
         self.asset = asset
@@ -52,6 +53,7 @@ class MarketLifecycle:
         self._tracker = tracker
         self._dry_run = dry_run
         self._config = config
+        self._on_fill = on_fill
         self._state = LifecycleState.INIT
         self._book_ws = OrderBookWS()
         self._task: Optional[asyncio.Task] = None
@@ -265,6 +267,9 @@ class MarketLifecycle:
         if order_id is None and not self._dry_run:
             self._state = LifecycleState.RESOLVED
             return
+
+        if not self._dry_run and order_id and self._on_fill:
+            self._on_fill()
 
         token_id = (
             self.slot.up_token_id

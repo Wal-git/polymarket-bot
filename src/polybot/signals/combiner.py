@@ -377,7 +377,8 @@ def should_trade(
         )
         return None
 
-    base_min_usdc = float(siz_cfg.get("min_trade_usdc", 10.0))
+    base_min_usdc = _override("min_trade_usdc", float(siz_cfg.get("min_trade_usdc", 10.0)))
+    base_max_usdc = _override("max_trade_usdc", float(siz_cfg.get("max_trade_usdc", 200.0)))
     double_min_threshold = _override(
         "double_min_above_usd", siz_cfg.get("double_min_above_usd", 200.0)
     )
@@ -391,7 +392,7 @@ def should_trade(
         bankroll=bankroll,
         kelly_fraction=float(siz_cfg.get("kelly_fraction", 0.25)),
         min_usdc=effective_min_usdc,
-        max_usdc=float(siz_cfg.get("max_trade_usdc", 200.0)),
+        max_usdc=base_max_usdc,
     )
 
     logger.info(

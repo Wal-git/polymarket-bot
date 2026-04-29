@@ -140,11 +140,17 @@ def price_size_to_amounts(price: float, size: float, side: int) -> tuple[int, in
     CLOB precision rules (enforced server-side):
       makerAmount (USDC): max 4 decimal places → must be a multiple of 100
       takerAmount (shares): max 2 decimal places → must be a multiple of 10_000
+
+    Computing maker and taker independently from price*size introduces floating
+    point drift so that maker/taker ≠ price, causing CLOB tick-size rejections.
+    Fix: anchor the shares side first, then derive the USDC side from it using
+    integer arithmetic (price_ticks * shares // 100) so the implied price is exact.
     """
-    if side == 0:  # BUY: pay USDC, receive shares
-        maker = round(price * size * 1_000_000 / 100) * 100
+    price_ticks = round(price * 100)  # e.g. 0.78 → 78
+    if side == 0:  # BUY: pay USDC (maker), receive shares (taker)
         taker = round(size * 1_000_000 / 10_000) * 10_000
-    else:  # SELL: pay shares, receive USDC
+        maker = price_ticks * taker // 100
+    else:  # SELL: pay shares (maker), receive USDC (taker)
         maker = round(size * 1_000_000 / 10_000) * 10_000
-        taker = round(price * size * 1_000_000 / 100) * 100
+        taker = price_ticks * maker // 100
     return maker, taker

@@ -25,7 +25,7 @@ assets:
     chainlink_aggregator: "0xc907E116054Ad103354f2D350FD2514433D57F6f"  # Polygon BTC/USD
     chainlink_rpc_url: "https://1rpc.io/matic"
     calibration_table_path: "data/calibration_table.json"
-    eval_only: false                  # live trading
+    eval_only: true                   # paused
     # No threshold overrides — BTC uses the strategy.signals defaults below.
 
   ETH:
@@ -59,6 +59,8 @@ assets:
       deep_gap_usd: 2.5               # mean delta ≥ $2.5 → use deep_gap_min_entry floor
       deep_gap_min_entry: 0.50        # allow entry down to 0.50 on high-conviction moves
       min_agreement: 5                # ALL 5 exchanges must agree — 88.9% accuracy vs 77.8% at 2
+      min_trade_usdc: 70              # one-off: manual override for next trade
+      max_trade_usdc: 70              # pin to exactly $70
 
 strategy:
   name: btc_5min
