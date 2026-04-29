@@ -73,22 +73,20 @@ class CLOBClient:
             )
             return None
 
-        from py_clob_client.clob_types import OrderArgs
-        from py_clob_client.order_builder.constants import BUY as CLOB_BUY, SELL as CLOB_SELL
+        from polybot.client.v2_order import build_v2_order, post_v2_order, price_size_to_amounts
 
-        side = CLOB_BUY if order.side == Side.BUY else CLOB_SELL
-
-        order_args = OrderArgs(
-            token_id=str(order.token_id),
-            price=float(order.limit_price or 0),
-            size=float(order.size),
-            side=side,
+        pk = get_private_key()
+        creds = get_clob_creds()
+        side_int = 0 if order.side == Side.BUY else 1
+        neg_risk = getattr(order, "neg_risk", False)
+        maker_amount, taker_amount = price_size_to_amounts(
+            float(order.limit_price or 0), float(order.size), side_int
         )
-        resp = self.client.create_and_post_order(order_args)
-        if isinstance(resp, dict):
-            order_id = resp.get("orderID") or resp.get("id") or "unknown"
-        else:
-            order_id = getattr(resp, "orderID", None) or getattr(resp, "id", "unknown")
+        signed_order = build_v2_order(pk, str(order.token_id), maker_amount, taker_amount,
+                                      side_int, neg_risk=neg_risk)
+        resp = post_v2_order(pk, creds["api_key"], creds["api_secret"], creds["passphrase"],
+                             signed_order)
+        order_id = resp.get("orderID") or resp.get("id") or "unknown"
         logger.info("order_placed", order_id=order_id, token_id=order.token_id)
         return order_id
 
