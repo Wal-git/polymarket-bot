@@ -62,7 +62,11 @@ def should_trade(
     max_gap = _override("max_gap_usd", div_cfg.get("max_gap_usd", 0.0))  # 0 = disabled
     fast_pass = _override("fast_pass_usd", div_cfg.get("fast_pass_usd", 200.0))
     fast_pass_enabled = bool(div_cfg.get("fast_pass_enabled", True))
-    min_agreement = int(div_cfg.get("min_agreement", 2))
+    min_agreement = int(
+        asset_thresholds.min_agreement
+        if (asset_thresholds is not None and asset_thresholds.min_agreement is not None)
+        else div_cfg.get("min_agreement", 2)
+    )
     threshold_buy = float(imb_cfg.get("buy_threshold", 1.8))
     threshold_sell = float(imb_cfg.get("sell_threshold", 0.55))
     window_cfg = imb_cfg.get("detection_window_seconds", [30, 90])
@@ -183,6 +187,9 @@ def should_trade(
     else:
         _macro_diag = dict(vix=None, dxy=None, es_price=None, es_pct_change_1h=None)
 
+    deep_gap_usd = _override("deep_gap_usd", siz_cfg.get("deep_gap_usd", 0.0))
+    deep_gap_min_entry = _override("deep_gap_min_entry", siz_cfg.get("deep_gap_min_entry", 0.0))
+
     _thresholds = dict(
         min_gap_usd=min_gap,
         max_gap_usd=max_gap,
@@ -192,6 +199,8 @@ def should_trade(
         buy_threshold=threshold_buy,
         sell_threshold=threshold_sell,
         bankroll=round(bankroll, 2),
+        deep_gap_usd=deep_gap_usd,
+        deep_gap_min_entry=deep_gap_min_entry,
     )
 
     def _emit(**extra) -> None:
@@ -266,15 +275,27 @@ def should_trade(
     imbalance = calculate_imbalance(snapshot, depth=depth)
     entry_price = book_ws.best_ask(direction) or 0.5
 
-    # Entry-price gate: skip trades where the orderbook isn't already strongly
-    # consensus on our side. Empirically (~50 trade sample), entry_price is the
-    # single biggest driver of EV — slots with best_ask < 0.80 were heavy net
-    # losers despite a 73% raw win rate. Defaults of 0 disable both gates.
+    # mean_abs_delta is needed for both the deep-gap entry-price check and
+    # the confidence formula below.
+    mean_abs_delta = sum(abs_deltas) / len(abs_deltas)
+
+    # Entry-price gate: tiered floor based on divergence strength.
+    # Normal floor (min_entry_price) applies unless every exchange's average
+    # delta exceeds deep_gap_usd — in that case the floor drops to
+    # deep_gap_min_entry, allowing high-conviction signals to trade at lower
+    # market prices where the upside is larger.
     min_entry_price = float(siz_cfg.get("min_entry_price", 0.0))
     max_entry_price = float(siz_cfg.get("max_entry_price", 0.0))
-    if min_entry_price > 0 and entry_price < min_entry_price:
+    deep_gap_triggered = (
+        deep_gap_usd > 0
+        and mean_abs_delta >= deep_gap_usd
+        and deep_gap_min_entry > 0
+    )
+    effective_min_entry = deep_gap_min_entry if deep_gap_triggered else min_entry_price
+    if effective_min_entry > 0 and entry_price < effective_min_entry:
         logger.debug("entry_price_below_floor", slug=slot.slug,
-                     entry_price=round(entry_price, 4), floor=min_entry_price)
+                     entry_price=round(entry_price, 4), floor=effective_min_entry,
+                     deep_gap_triggered=deep_gap_triggered)
         _emit(
             div_direction=direction.value,
             imb_direction=imb_direction.value if imb_direction else None,
@@ -282,6 +303,8 @@ def should_trade(
             confluence=False, fast_pass=fast_pass_triggered,
             confidence=None, size_usdc=None, direction=None,
             best_ask=round(entry_price, 4),
+            mean_abs_delta=round(mean_abs_delta, 2),
+            deep_gap_triggered=deep_gap_triggered,
             reject_reason="entry_price_too_low",
         )
         return None
@@ -295,12 +318,21 @@ def should_trade(
             confluence=False, fast_pass=fast_pass_triggered,
             confidence=None, size_usdc=None, direction=None,
             best_ask=round(entry_price, 4),
+            mean_abs_delta=round(mean_abs_delta, 2),
+            deep_gap_triggered=deep_gap_triggered,
             reject_reason="entry_price_too_high",
         )
         return None
 
     # Confidence — calibrated lookup if enabled and table available, else formula.
-    mean_abs_delta = sum(abs_deltas) / len(abs_deltas)
+    # Formula uses percentage delta (mean_abs_delta / price_to_beat) so it is
+    # asset-agnostic: a 0.2% move on BTC and a 0.2% move on ETH both yield the
+    # same confidence score, regardless of their dollar sizes.
+    # Scaling constant 0.004 (0.4% ≈ full confidence above the 0.60 base):
+    #   BTC $150 delta @ $75k  (0.20%) → 0.95  (capped)
+    #   ETH $2.0 delta @ $2.25k (0.089%) → 0.82  (passes 0.80 gate)
+    #   ETH $1.5 delta @ $2.25k (0.067%) → 0.77  (blocked — matches 77.8% empirical)
+    _pct_delta = mean_abs_delta / slot.price_to_beat if slot.price_to_beat else 0.0
     cal_cfg = sig_cfg.get("calibration", {})
     confidence_source = "formula"
     if cal_cfg.get("enabled", False):
@@ -324,12 +356,12 @@ def should_trade(
             confidence = min(0.95, rate)
             confidence_source = f"calibration:{source}"
         else:
-            confidence = min(0.95, 0.6 + mean_abs_delta / 250.0)
+            confidence = min(0.95, 0.6 + _pct_delta / 0.004)
             confidence_source = "formula:no_table"
     else:
-        confidence = min(0.95, 0.6 + mean_abs_delta / 250.0)
+        confidence = min(0.95, 0.6 + _pct_delta / 0.004)
 
-    min_confidence = float(siz_cfg.get("min_confidence", 0.0))
+    min_confidence = _override("min_confidence", float(siz_cfg.get("min_confidence", 0.0)))
     if confidence < min_confidence:
         logger.debug("confidence_below_threshold", slug=slot.slug,
                      confidence=round(confidence, 3), min_confidence=min_confidence)
@@ -374,6 +406,7 @@ def should_trade(
         down_votes=down_votes,
         fast_pass=fast_pass_triggered,
         doubled_min=large_move,
+        deep_gap_triggered=deep_gap_triggered,
     )
 
     _emit(
@@ -391,6 +424,7 @@ def should_trade(
         mean_abs_delta=round(mean_abs_delta, 2),
         max_abs_delta=round(max_abs_delta, 2),
         best_ask=round(entry_price, 4),
+        deep_gap_triggered=deep_gap_triggered,
     )
 
     return TradeSignal(direction=direction, confidence=round(confidence, 3), size_usdc=size)

@@ -123,16 +123,28 @@ def post_v2_order(
         signer, creds, RequestArgs(method="POST", request_path="/order", body=body_json)
     )
     r = httpx.post(f"{CLOB_URL}/order", headers=headers, content=body_json, timeout=15)
+    if not r.is_success:
+        import structlog as _sl
+        _sl.get_logger().error(
+            "clob_order_rejected",
+            status=r.status_code,
+            body=r.text[:1000],
+        )
     r.raise_for_status()
     return r.json()
 
 
 def price_size_to_amounts(price: float, size: float, side: int) -> tuple[int, int]:
-    """Convert price/size to (makerAmount, takerAmount) in 6-decimal units."""
+    """Convert price/size to (makerAmount, takerAmount) in 6-decimal units.
+
+    CLOB precision rules (enforced server-side):
+      makerAmount (USDC): max 4 decimal places → must be a multiple of 100
+      takerAmount (shares): max 2 decimal places → must be a multiple of 10_000
+    """
     if side == 0:  # BUY: pay USDC, receive shares
-        maker = round(price * size * 1_000_000)
-        taker = round(size * 1_000_000)
+        maker = round(price * size * 1_000_000 / 100) * 100
+        taker = round(size * 1_000_000 / 10_000) * 10_000
     else:  # SELL: pay shares, receive USDC
-        maker = round(size * 1_000_000)
-        taker = round(price * size * 1_000_000)
+        maker = round(size * 1_000_000 / 10_000) * 10_000
+        taker = round(price * size * 1_000_000 / 100) * 100
     return maker, taker
