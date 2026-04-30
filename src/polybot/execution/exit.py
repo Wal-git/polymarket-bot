@@ -50,7 +50,7 @@ async def monitor_position(
             )
             return ExitResult(reason=ExitReason.HOLD_TO_RESOLUTION, pnl=None)
 
-        await asyncio.sleep(2)
+        await orderbook_ws.wait_bid_change(timeout=2.0)
 
 
 async def _sell(
