@@ -23,17 +23,33 @@ async def execute_entry(
     dry_run: bool,
     entry_window: tuple[int, int] = (60, 180),
     signal_ts: Optional[float] = None,
+    asset_name: str = "",
 ) -> Optional[str]:
     """Place a limit BUY order within the 60-180s entry window.
 
     Returns the order_id (or a dry-run placeholder) on success, None on skip.
     """
+    from polybot.monitoring.alerting import blocked_message, send_alert
+
     window_start, window_end = entry_window
     slot_start_sec = slot.start_ms / 1000
 
     elapsed = time.time() - slot_start_sec
     if elapsed > window_end:
         logger.info("entry_window_expired", slug=slot.slug, elapsed=round(elapsed))
+        from polybot.monitoring.event_log import emit_execution
+        emit_execution(
+            slug=slot.slug, asset=asset_name, status="blocked",
+            block_reason="entry_window_expired",
+            direction=signal.direction.value, confidence=signal.confidence,
+            size_usdc=round(signal.size_usdc, 2), elapsed_s=round(elapsed),
+        )
+        send_alert(blocked_message(
+            asset=asset_name, slug=slot.slug,
+            direction=signal.direction.value, confidence=signal.confidence,
+            size_usdc=signal.size_usdc, reason="entry_window_expired",
+            detail=f"Elapsed: {round(elapsed)}s (window closes at {window_end}s)",
+        ))
         return None
 
     if elapsed < window_start:
@@ -44,11 +60,37 @@ async def execute_entry(
     elapsed = time.time() - slot_start_sec
     if elapsed > window_end:
         logger.info("entry_window_missed_after_wait", slug=slot.slug)
+        from polybot.monitoring.event_log import emit_execution
+        emit_execution(
+            slug=slot.slug, asset=asset_name, status="blocked",
+            block_reason="entry_window_missed_after_wait",
+            direction=signal.direction.value, confidence=signal.confidence,
+            size_usdc=round(signal.size_usdc, 2), elapsed_s=round(elapsed),
+        )
+        send_alert(blocked_message(
+            asset=asset_name, slug=slot.slug,
+            direction=signal.direction.value, confidence=signal.confidence,
+            size_usdc=signal.size_usdc, reason="entry_window_missed_after_wait",
+            detail=f"Elapsed after wait: {round(elapsed)}s",
+        ))
         return None
 
     best_ask = orderbook_ws.best_ask(signal.direction)
     if best_ask is None:
         logger.warning("no_ask_price", slug=slot.slug, direction=signal.direction.value)
+        from polybot.monitoring.event_log import emit_execution
+        emit_execution(
+            slug=slot.slug, asset=asset_name, status="blocked",
+            block_reason="no_ask_price",
+            direction=signal.direction.value, confidence=signal.confidence,
+            size_usdc=round(signal.size_usdc, 2),
+        )
+        send_alert(blocked_message(
+            asset=asset_name, slug=slot.slug,
+            direction=signal.direction.value, confidence=signal.confidence,
+            size_usdc=signal.size_usdc, reason="no_ask_price",
+            detail="Orderbook WebSocket had no ask data at execution time",
+        ))
         return None
 
     token_id = slot.up_token_id if signal.direction == Direction.UP else slot.down_token_id
