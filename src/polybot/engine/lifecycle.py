@@ -54,6 +54,7 @@ class MarketLifecycle:
         self._dry_run = dry_run
         self._config = config
         self._on_fill = on_fill
+        self._signal: Optional[object] = None  # set when should_trade fires; used by error handler
         self._state = LifecycleState.INIT
         self._book_ws = OrderBookWS()
         self._task: Optional[asyncio.Task] = None
@@ -101,6 +102,13 @@ class MarketLifecycle:
             self._state = LifecycleState.STOPPING
         except Exception as e:
             logger.error("lifecycle_error", slug=self.slot.slug, asset=self.asset.name, error=str(e))
+            if self._signal is not None:
+                from polybot.monitoring.alerting import error_message, send_alert
+                send_alert(error_message(
+                    asset=self.asset.name,
+                    slug=self.slot.slug,
+                    error=str(e),
+                ))
             self._state = LifecycleState.RESOLVED
         finally:
             self._book_ws.destroy()
@@ -198,7 +206,10 @@ class MarketLifecycle:
             self._state = LifecycleState.RESOLVED
             return
 
+        self._signal = signal  # mark signal fired so error handler can alert
         signal_ts = time.time()
+
+        from polybot.monitoring.alerting import blocked_message, send_alert
 
         # Eval-only mode: signal was evaluated and logged via the combiner,
         # but we don't place an order. Used during the canary period for a
@@ -221,6 +232,12 @@ class MarketLifecycle:
                 confidence=signal.confidence,
                 size_usdc=round(signal.size_usdc, 2),
             )
+            send_alert(blocked_message(
+                asset=self.asset.name, slug=self.slot.slug,
+                direction=signal.direction.value, confidence=signal.confidence,
+                size_usdc=signal.size_usdc, reason="eval_only",
+                detail="Asset is in canary (eval_only) mode — no order placed",
+            ))
             self._state = LifecycleState.RESOLVED
             return
 
@@ -250,6 +267,12 @@ class MarketLifecycle:
                 balance_at_block=round(live_balance, 2),
                 required_usdc=min_usdc,
             )
+            send_alert(blocked_message(
+                asset=self.asset.name, slug=self.slot.slug,
+                direction=signal.direction.value, confidence=signal.confidence,
+                size_usdc=signal.size_usdc, reason="insufficient_balance",
+                detail=f"Balance: ${live_balance:.2f} | Required: ${min_usdc:.2f}",
+            ))
             self._state = LifecycleState.RESOLVED
             return
 
@@ -262,6 +285,7 @@ class MarketLifecycle:
             dry_run=self._dry_run,
             entry_window=(window_start, window_end),
             signal_ts=signal_ts,
+            asset_name=self.asset.name,
         )
 
         if order_id is None and not self._dry_run:
