@@ -17,7 +17,7 @@ from polybot.monitoring.tracker import PositionTracker
 logger = structlog.get_logger()
 console = Console()
 
-_REDEEM_INTERVAL_SECS = 900  # re-scan for redeemable positions every 15 minutes
+_REDEEM_INTERVAL_SECS = 300  # re-scan for redeemable positions every 5 minutes
 
 
 class MultiAssetEngine:

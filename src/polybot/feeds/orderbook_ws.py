@@ -30,6 +30,7 @@ class OrderBookWS:
         self._imbalance_history: deque[ImbalanceReading] = deque(maxlen=_IMBALANCE_BUFFER)
         self._slot_start_ts: float = 0.0
         self._ready: asyncio.Event = asyncio.Event()
+        self._bid_changed: asyncio.Event = asyncio.Event()
         self._task: Optional[asyncio.Task] = None
 
     def subscribe(self, up_token_id: str, down_token_id: str, slot_start_ts: float) -> None:
@@ -100,6 +101,7 @@ class OrderBookWS:
         }
 
     def _apply_price_change(self, msg: dict) -> None:
+        bid_updated = False
         for change in msg.get("price_changes", []):
             asset_id = change["asset_id"]
             if asset_id not in self._books:
@@ -112,6 +114,10 @@ class OrderBookWS:
                 book[side_key].pop(price, None)
             else:
                 book[side_key][price] = size
+            if side_key == "bids":
+                bid_updated = True
+        if bid_updated:
+            self._bid_changed.set()
 
     def _record_imbalance(self) -> None:
         book = self._books.get(self._up_token)
@@ -135,6 +141,14 @@ class OrderBookWS:
 
     def get_imbalance_history(self) -> list[ImbalanceReading]:
         return list(self._imbalance_history)
+
+    async def wait_bid_change(self, timeout: float = 2.0) -> None:
+        """Wait until any bid update arrives, or until timeout elapses."""
+        self._bid_changed.clear()
+        try:
+            await asyncio.wait_for(self._bid_changed.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            pass
 
     def best_ask(self, direction: Direction) -> Optional[float]:
         token = self._up_token if direction == Direction.UP else self._down_token
