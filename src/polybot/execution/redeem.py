@@ -15,6 +15,7 @@ from web3 import Web3
 logger = structlog.get_logger()
 
 _CTF_ADDRESS = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+_PUSD_ADDRESS = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"  # native USDC on Polygon (Polymarket's PUSD)
 _POLYGON_RPC = "https://1rpc.io/matic"
 _DATA_API = "https://data-api.polymarket.com"
 
@@ -80,7 +81,7 @@ def redeem_resolved_positions(private_key: str, clob_client) -> tuple[int, list[
     account = w3.eth.account.from_key(private_key)
     address = account.address
 
-    collateral = clob_client.get_collateral_address()
+    collateral = _PUSD_ADDRESS
     ctf = w3.eth.contract(address=_CTF_ADDRESS, abi=_CTF_ABI)
 
     all_positions = _fetch_redeemable(address)
