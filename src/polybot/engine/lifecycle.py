@@ -345,10 +345,9 @@ class MarketLifecycle:
             _, outcomes = maybe_redeem(get_private_key(), self._clob.client)
             self._clob.sync_balance_allowance()
             invalidate_cache()
-            # Remove from tracker — position settled on-chain, no sell order needed
-            self._tracker.close_position(token_id)
-            self._tracker.save()
-            # Record outcome for dashboard
+            # Record outcome for dashboard. We only close the tracker position
+            # after emit_result succeeds — otherwise an unresolved outcome leaves
+            # the trade orphaned (no position to reconcile, no result row).
             matched = False
             for outcome in outcomes:
                 if outcome.get("slug") == self.slot.slug:
@@ -420,5 +419,18 @@ class MarketLifecycle:
                         retry_in=wait,
                     )
                     await asyncio.sleep(wait)
+
+            if matched:
+                self._tracker.close_position(token_id)
+                self._tracker.save()
+            else:
+                # Outcome API still hasn't published. Leave the position in the
+                # tracker so the scheduler's reconcile_resolved_positions pass
+                # finalizes it on a later cycle (emit_result + close_position).
+                logger.warning(
+                    "outcome_unresolved_deferred",
+                    slug=self.slot.slug,
+                    asset=self.asset.name,
+                )
 
         self._state = LifecycleState.RESOLVED
