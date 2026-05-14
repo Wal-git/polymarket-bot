@@ -135,6 +135,7 @@ async def execute_entry(
     from polybot.monitoring.event_log import emit_execution
     emit_execution(
         slug=slot.slug,
+        asset=asset_name,
         status="filled",
         direction=signal.direction.value,
         signal_price=float(signal.size_usdc / float(size)) if size else None,
