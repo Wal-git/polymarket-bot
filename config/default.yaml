@@ -107,7 +107,9 @@ strategy:
     price: best_ask
 
   exit:
-    profit_target: 0.75             # sell when shares hit 75c
+    # profit_target removed 2026-05-14: with min_entry_price=0.80, any target
+    # below 0.80 fires on the first poll and forces a loss-locking sell.
+    # Positions now ride to resolution unless bid collapses past stop_loss.
     stop_loss: 0.35                 # sell when shares drop to 35c
     hold_to_resolution_s_remaining: 60   # if less than 60s left, hold to resolution
 

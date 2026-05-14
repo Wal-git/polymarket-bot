@@ -311,7 +311,6 @@ class MarketLifecycle:
             clob=self._clob,
             tracker=self._tracker,
             dry_run=self._dry_run,
-            profit_target=float(exit_cfg.get("profit_target", 0.75)),
             stop_loss=float(exit_cfg.get("stop_loss", 0.35)),
             hold_to_resolution_secs=float(exit_cfg.get("hold_to_resolution_s_remaining", 60.0)),
         )

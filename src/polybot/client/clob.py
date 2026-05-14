@@ -203,6 +203,25 @@ class CLOBClient:
             logger.warning("balance_fetch_failed")
             return Decimal("0")
 
+    def get_conditional_balance(self, token_id: str) -> Decimal:
+        """Return CTF share balance held by the proxy for a given token_id.
+
+        Used by the exit path to confirm the entry BUY has actually filled
+        before attempting a SELL — otherwise the CLOB rejects with
+        "balance: 0" and crashes the lifecycle.
+        """
+        try:
+            from py_clob_client_v2.clob_types import AssetType, BalanceAllowanceParams
+            params = BalanceAllowanceParams(
+                asset_type=AssetType.CONDITIONAL,
+                token_id=str(token_id),
+            )
+            bal = self.client.get_balance_allowance(params=params)
+            return Decimal(str(bal.get("balance", 0))) / Decimal("1e6")
+        except Exception as e:
+            logger.warning("conditional_balance_fetch_failed", token_id=token_id, error=str(e))
+            return Decimal("0")
+
     def sync_balance_allowance(self) -> None:
         try:
             from py_clob_client_v2.clob_types import AssetType, BalanceAllowanceParams

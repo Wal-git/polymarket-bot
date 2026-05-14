@@ -76,8 +76,18 @@ def main() -> int:
         params = BalanceAllowanceParams(asset_type=AssetType.COLLATERAL)
         bal = client.get_balance_allowance(params=params)
         b = Decimal(str(bal.get("balance", 0))) / Decimal("1e6")
-        a = Decimal(str(bal.get("allowance", 0))) / Decimal("1e6")
-        print(f"[OK]   funder {DEPOSIT_WALLET} → balance ${b} pUSD, allowance ${a}")
+        # The CLOB returns "allowances" (plural) as a dict keyed by spender address,
+        # each value is a uint256 string. An empty/missing dict means the V2 exchange
+        # contracts can't debit the proxy and orders will reject with "balance: 0".
+        allowances = bal.get("allowances", {}) or {}
+        n_approved = sum(1 for v in allowances.values() if int(v or 0) > 0)
+        n_total = len(allowances)
+        ok_alw = n_approved > 0 and n_approved == n_total
+        print(
+            f"[{'OK' if ok_alw else 'FAIL'}]   funder {DEPOSIT_WALLET} → "
+            f"balance ${b} pUSD, allowances {n_approved}/{n_total} spenders approved"
+        )
+        ok &= ok_alw
     except Exception as e:
         print(f"[FAIL] get_balance_allowance for funder: {e}")
         ok = False
