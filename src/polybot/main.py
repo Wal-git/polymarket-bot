@@ -144,5 +144,56 @@ def cancel_all():
     console.print("[bold green]All orders cancelled[/]")
 
 
+@app.command()
+def doctor(
+    live: bool = typer.Option(
+        False, "--live", help="Also place + cancel a real $0.05 test order"
+    ),
+):
+    """Trade-readiness diagnostics: SDK version, auth, balances, allowances, signing parity."""
+    from polybot.cli.doctor import _run
+    failures, warnings = _run()
+    if live:
+        import time
+        from decimal import Decimal
+        from polybot.client.clob import CLOBClient
+        from polybot.models.types import OrderRequest, Side
+        console.print("\n[bold cyan][8][/] Live order place + cancel")
+        try:
+            c = CLOBClient(); c.connect()
+            req = OrderRequest(
+                token_id="78433024518676680431174478322854148606578065650008220678402966840627347604025",
+                side=Side.BUY,
+                size=Decimal("5"),
+                limit_price=Decimal("0.01"),
+            )
+            order_id = c.place_order(req, dry_run=False)
+            if not order_id or order_id == "unknown":
+                console.print(f"    [red]FAIL[/] no order_id returned")
+                failures += 1
+            else:
+                console.print(f"    [green]OK[/]   placed: {order_id}")
+                time.sleep(2)
+                resp = c.client.cancel_orders([order_id])
+                if isinstance(resp, dict) and order_id in (resp.get("canceled") or []):
+                    console.print(f"    [green]OK[/]   cancelled cleanly")
+                else:
+                    console.print(f"    [red]FAIL[/] cancel didn't confirm: {resp}")
+                    failures += 1
+        except Exception as e:
+            console.print(f"    [red]FAIL[/] {e}")
+            failures += 1
+    else:
+        console.print("\n[dim]Skipping live order check. Pass --live to run the full place+cancel.[/]")
+    console.print()
+    if failures:
+        console.print(f"[red bold]{failures} check(s) failed, {warnings} warning(s)[/]")
+        raise typer.Exit(1)
+    if warnings:
+        console.print(f"[yellow]{warnings} warning(s) — bot operable but review recommended[/]")
+        raise typer.Exit(0)
+    console.print("[green bold]All checks passed.[/]")
+
+
 if __name__ == "__main__":
     app()

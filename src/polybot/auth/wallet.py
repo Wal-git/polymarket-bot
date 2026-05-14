@@ -32,6 +32,11 @@ def get_clob_creds() -> dict:
     }
 
 
+def get_builder_code() -> str | None:
+    code = os.environ.get("BUILDER_CODE", "").strip()
+    return code or None
+
+
 def run_setup_wizard():
     from getpass import getpass
 
@@ -45,15 +50,15 @@ def run_setup_wizard():
 
     print("\nDeriving CLOB API credentials...")
     try:
-        from py_clob_client.client import ClobClient
-        from py_clob_client.constants import POLYGON
+        from py_clob_client_v2.client import ClobClient
+        from py_clob_client_v2.constants import POLYGON
 
         client = ClobClient(
             "https://clob.polymarket.com",
             key=private_key,
             chain_id=POLYGON,
         )
-        creds = client.create_or_derive_api_creds()
+        creds = client.create_or_derive_api_key()
         api_key = creds.api_key
         api_secret = creds.api_secret
         api_passphrase = creds.api_passphrase

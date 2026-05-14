@@ -1,156 +1,175 @@
-"""
-Polymarket CLOB V2 order signing.
+"""Hand-rolled V2 CLOB order signer — fallback for when the SDK regresses.
 
-V2 changes vs V1:
- - New exchange: 0xE111180000d2663C0091e4f400237545B87B996B (regular)
-                 0xe2222d279d744050d28e00520010520000310F59 (neg-risk)
- - Domain version: "2"
- - Order struct: salt, maker, signer, tokenId, makerAmount, takerAmount,
-                 side, signatureType, timestamp, metadata, builder
-   (removed: taker, nonce, feeRateBps, expiration from struct)
- - POST body adds: taker (zero addr), expiration, deferExec fields
+Gated by env var: set `CLOB_USE_HANDROLLED_SIGNER=1` and `clob.py` will route
+through `build_v2_poly_1271_order()` here instead of the SDK's
+`create_order()`. The SDK path is the default and what we rely on day to day;
+this exists so a future SDK regression doesn't take the bot offline.
+
+What it implements:
+  - The V2 CTF Exchange order struct (no taker/nonce/feeRateBps/expiration in
+    the signed body — those are V1).
+  - The Solady `TypedDataSign` nested-typed-data wrapper that the deposit-
+    wallet `isValidSignature` on the proxy requires (= what the CLOB's
+    POLY_1271 verifier checks). Matches v1.0.1 SDK's
+    `_build_poly_1271_order_signature` byte-for-byte.
+
+To verify against the SDK: run `scripts/compare_handrolled_vs_sdk.py` (TODO).
+If signatures differ, prefer the SDK's. This module is a safety net, not a
+preference.
 """
 from __future__ import annotations
 
-import json
 import os
 import random
 import time
-from decimal import Decimal
 
-import httpx
+from eth_abi import encode as abi_encode
 from eth_account import Account
 from eth_utils import keccak
 
-from py_clob_client.clob_types import RequestArgs
-from py_clob_client.headers.headers import create_level_2_headers
-from py_clob_client.signer import Signer
-
-V2_EXCHANGE = "0xE111180000d2663C0091e4f400237545B87B996B"
+# V2 exchange contracts (chain 137)
+V2_EXCHANGE          = "0xE111180000d2663C0091e4f400237545B87B996B"
 V2_EXCHANGE_NEG_RISK = "0xe2222d279d744050d28e00520010520000310F59"
-CLOB_URL = "https://clob.polymarket.com"
+CHAIN_ID = 137
 
 BYTES32_ZERO = b"\x00" * 32
-ORDER_TYPE_STR = (
+
+ORDER_TYPE_STRING = (
     "Order(uint256 salt,address maker,address signer,uint256 tokenId,"
     "uint256 makerAmount,uint256 takerAmount,uint8 side,uint8 signatureType,"
     "uint256 timestamp,bytes32 metadata,bytes32 builder)"
 )
-ORDER_TYPEHASH = keccak(text=ORDER_TYPE_STR)
+SOLADY_TYPE_STRING = (
+    "TypedDataSign(Order contents,string name,string version,uint256 chainId,"
+    "address verifyingContract,bytes32 salt)" + ORDER_TYPE_STRING
+)
+DOMAIN_TYPE_STRING = (
+    "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
+)
 
-DOMAIN_TYPEHASH = keccak(text="EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")
+ORDER_TYPE_HASH   = keccak(text=ORDER_TYPE_STRING)
+SOLADY_TYPE_HASH  = keccak(text=SOLADY_TYPE_STRING)
+DOMAIN_TYPE_HASH  = keccak(text=DOMAIN_TYPE_STRING)
 
-def _domain_separator(exchange: str) -> bytes:
+CTF_EXCHANGE_NAME_HASH    = keccak(text="Polymarket CTF Exchange")
+CTF_EXCHANGE_VERSION_HASH = keccak(text="2")
+DEPOSIT_WALLET_NAME_HASH    = keccak(text="DepositWallet")
+DEPOSIT_WALLET_VERSION_HASH = keccak(text="1")
+
+
+def is_enabled() -> bool:
+    return os.environ.get("CLOB_USE_HANDROLLED_SIGNER", "").lower() in ("1", "true", "yes")
+
+
+def _hex_to_bytes32(h: str) -> bytes:
+    return bytes.fromhex(h.replace("0x", "").zfill(64))
+
+
+def _ctf_exchange_domain_separator(exchange: str) -> bytes:
     return keccak(
-        DOMAIN_TYPEHASH
-        + keccak(text="Polymarket CTF Exchange")
-        + keccak(text="2")
-        + (137).to_bytes(32, "big")
-        + bytes.fromhex("0" * 24 + exchange[2:].lower())
+        primitive=abi_encode(
+            ["bytes32", "bytes32", "bytes32", "uint256", "address"],
+            [DOMAIN_TYPE_HASH, CTF_EXCHANGE_NAME_HASH, CTF_EXCHANGE_VERSION_HASH, CHAIN_ID, exchange],
+        )
     )
 
-DOMAIN_SEP_REGULAR  = _domain_separator(V2_EXCHANGE)
-DOMAIN_SEP_NEG_RISK = _domain_separator(V2_EXCHANGE_NEG_RISK)
 
-
-def build_v2_order(
+def build_v2_poly_1271_order(
+    *,
     private_key: str,
+    deposit_wallet: str,
     token_id: str,
     maker_amount: int,
     taker_amount: int,
-    side: int,          # 0=BUY, 1=SELL
+    side: int,                 # 0 = BUY, 1 = SELL
+    timestamp_ms: int | None = None,
+    salt: int | None = None,
     neg_risk: bool = False,
+    builder_code: str = "0x" + "0" * 64,
+    metadata: str = "0x" + "0" * 64,
 ) -> dict:
-    acct = Account.from_key(private_key)
-    ds = DOMAIN_SEP_NEG_RISK if neg_risk else DOMAIN_SEP_REGULAR
-    salt = random.randint(1, 2**32)
-    ts = str(int(time.time() * 1000))
+    """Build + ERC-7739-wrap-sign a POLY_1271 order for the deposit wallet.
 
-    order_hash = keccak(
-        ORDER_TYPEHASH
-        + salt.to_bytes(32, "big")
-        + bytes.fromhex("0" * 24 + acct.address[2:].lower())  # maker
-        + bytes.fromhex("0" * 24 + acct.address[2:].lower())  # signer
-        + int(token_id).to_bytes(32, "big")
-        + maker_amount.to_bytes(32, "big")
-        + taker_amount.to_bytes(32, "big")
-        + side.to_bytes(32, "big")
-        + (0).to_bytes(32, "big")        # signatureType = EOA
-        + int(ts).to_bytes(32, "big")
-        + BYTES32_ZERO                   # metadata
-        + BYTES32_ZERO                   # builder
+    Returns the JSON body the CLOB expects at POST /order's `order` field.
+    """
+    acct = Account.from_key(private_key)
+    exchange = V2_EXCHANGE_NEG_RISK if neg_risk else V2_EXCHANGE
+    ts = str(timestamp_ms if timestamp_ms is not None else time.time_ns() // 1_000_000)
+    s = salt if salt is not None else random.randint(1, 2**60)
+
+    # 1) Hash the inner Order struct (`contents` in TypedDataSign)
+    contents_hash = keccak(
+        primitive=abi_encode(
+            ["bytes32", "uint256", "address", "address", "uint256", "uint256",
+             "uint256", "uint8", "uint8", "uint256", "bytes32", "bytes32"],
+            [
+                ORDER_TYPE_HASH, s, deposit_wallet, deposit_wallet,
+                int(token_id), maker_amount, taker_amount, side,
+                3,  # signatureType POLY_1271
+                int(ts), _hex_to_bytes32(metadata), _hex_to_bytes32(builder_code),
+            ],
+        )
     )
-    signed = acct.unsafe_sign_hash(keccak(b"\x19\x01" + ds + order_hash))
+
+    # 2) Build the TypedDataSign struct hash. Per Solady/ERC-7739, the
+    #    `name`/`version`/`chainId`/`verifyingContract`/`salt` fields here
+    #    describe the *wallet that validates the signature* (the DepositWallet),
+    #    NOT the app. This is the part that makes ERC-1271 work — the
+    #    DepositWallet's `isValidSignature` reconstructs this hash and checks
+    #    that its owner (EOA) signed it.
+    typed_data_sign_hash = keccak(
+        primitive=abi_encode(
+            ["bytes32", "bytes32", "bytes32", "bytes32", "uint256", "address", "bytes32"],
+            [
+                SOLADY_TYPE_HASH,
+                contents_hash,
+                DEPOSIT_WALLET_NAME_HASH,
+                DEPOSIT_WALLET_VERSION_HASH,
+                CHAIN_ID,
+                deposit_wallet,
+                BYTES32_ZERO,
+            ],
+        )
+    )
+
+    # 3) The outer EIP-712 domain separator is the *app* (CTF Exchange V2) —
+    #    this is what `signer.signedMessage(hash)` would normally produce if
+    #    the wallet signed an ORDER directly. The ERC-7739 trick is signing
+    #    a wallet-domain-wrapped statement *about* this app-domain hash.
+    ctf_exchange_domain_sep = _ctf_exchange_domain_separator(exchange)
+
+    # 4) Final EIP-712 message hash to sign
+    msg_hash = keccak(b"\x19\x01" + ctf_exchange_domain_sep + typed_data_sign_hash)
+    signed = acct.unsafe_sign_hash(msg_hash)
+
+    # 5) ERC-7739 signature format: inner_sig || app_domain_sep || contents_hash
+    #    || contents_type_descr || uint16(contents_type_len). The CLOB verifier
+    #    uses the trailing data to reconstruct what was signed without seeing
+    #    the inner Order struct.
+    inner_sig = signed.signature.hex()
+    contents_type_descr = ORDER_TYPE_STRING.encode("utf-8").hex()
+    contents_type_len = len(ORDER_TYPE_STRING).to_bytes(2, "big").hex()
+    full_signature = (
+        "0x"
+        + inner_sig
+        + ctf_exchange_domain_sep.hex()
+        + contents_hash.hex()
+        + contents_type_descr
+        + contents_type_len
+    )
 
     return {
-        "salt": salt,
-        "maker": acct.address,
-        "signer": acct.address,
-        "taker": "0x" + "0" * 40,
-        "tokenId": token_id,
+        "salt": s,
+        "maker": deposit_wallet,
+        "signer": deposit_wallet,
+        "tokenId": str(token_id),
         "makerAmount": str(maker_amount),
         "takerAmount": str(taker_amount),
         "side": "BUY" if side == 0 else "SELL",
-        "signatureType": 0,
+        "signatureType": 3,
         "timestamp": ts,
         "expiration": "0",
-        "metadata": "0x" + "0" * 64,
-        "builder": "0x" + "0" * 64,
-        "signature": "0x" + signed.signature.hex(),
+        "metadata": metadata,
+        "builder": builder_code,
+        "signature": full_signature,
     }
-
-
-def post_v2_order(
-    private_key: str,
-    api_key: str,
-    api_secret: str,
-    api_passphrase: str,
-    order: dict,
-    order_type: str = "GTC",
-) -> dict:
-    from py_clob_client.clob_types import ApiCreds
-
-    body_json = json.dumps({
-        "order": order,
-        "owner": api_key,
-        "orderType": order_type,
-        "postOnly": False,
-        "deferExec": False,
-    })
-    signer = Signer(private_key, 137)
-    creds = ApiCreds(api_key=api_key, api_secret=api_secret, api_passphrase=api_passphrase)
-    headers = create_level_2_headers(
-        signer, creds, RequestArgs(method="POST", request_path="/order", body=body_json)
-    )
-    r = httpx.post(f"{CLOB_URL}/order", headers=headers, content=body_json, timeout=15)
-    if not r.is_success:
-        import structlog as _sl
-        _sl.get_logger().error(
-            "clob_order_rejected",
-            status=r.status_code,
-            body=r.text[:1000],
-        )
-    r.raise_for_status()
-    return r.json()
-
-
-def price_size_to_amounts(price: float, size: float, side: int) -> tuple[int, int]:
-    """Convert price/size to (makerAmount, takerAmount) in 6-decimal units.
-
-    CLOB precision rules (enforced server-side):
-      makerAmount (USDC): max 4 decimal places → must be a multiple of 100
-      takerAmount (shares): max 2 decimal places → must be a multiple of 10_000
-
-    Computing maker and taker independently from price*size introduces floating
-    point drift so that maker/taker ≠ price, causing CLOB tick-size rejections.
-    Fix: anchor the shares side first, then derive the USDC side from it using
-    integer arithmetic (price_ticks * shares // 100) so the implied price is exact.
-    """
-    price_ticks = round(price * 100)  # e.g. 0.78 → 78
-    if side == 0:  # BUY: pay USDC (maker), receive shares (taker)
-        taker = round(size * 1_000_000 / 10_000) * 10_000
-        maker = price_ticks * taker // 100
-    else:  # SELL: pay shares (maker), receive USDC (taker)
-        maker = round(size * 1_000_000 / 10_000) * 10_000
-        taker = price_ticks * maker // 100
-    return maker, taker

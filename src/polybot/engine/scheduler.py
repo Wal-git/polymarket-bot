@@ -85,6 +85,7 @@ class MultiAssetEngine:
             if p.confidence is not None
         }
         count, outcomes = maybe_redeem(get_private_key(), self._clob.client)
+
         if count:
             self._clob.sync_balance_allowance()
             invalidate_cache()
