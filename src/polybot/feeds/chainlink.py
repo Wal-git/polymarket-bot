@@ -23,7 +23,7 @@ logger = structlog.get_logger()
 
 # Polygon mainnet BTC/USD aggregator proxy. EACAggregatorProxy → underlying.
 DEFAULT_BTC_USD_AGGREGATOR = "0xc907E116054Ad103354f2D350FD2514433D57F6f"
-DEFAULT_RPC_URL = "https://1rpc.io/matic"
+DEFAULT_RPC_URL = "https://polygon.drpc.org"
 
 _AGGREGATOR_ABI = [
     {

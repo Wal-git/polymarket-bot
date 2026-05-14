@@ -14,9 +14,11 @@ from web3 import Web3
 
 logger = structlog.get_logger()
 
-_CTF_ADDRESS = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
-_PUSD_ADDRESS = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"  # native USDC on Polygon (Polymarket's PUSD)
-_POLYGON_RPC = "https://1rpc.io/matic"
+_CTF_ADDRESS    = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+_ADAPTER        = "0xAdA100Db00Ca00073811820692005400218FcE1f"  # CtfCollateralAdapter (official)
+_PUSD_ADDRESS   = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
+_USDC_E_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+_POLYGON_RPC = "https://polygon.drpc.org"
 _DATA_API = "https://data-api.polymarket.com"
 
 _CTF_ABI = [
@@ -31,8 +33,53 @@ _CTF_ABI = [
         "outputs": [],
         "stateMutability": "nonpayable",
         "type": "function",
-    }
+    },
+    {
+        "inputs": [{"name": "owner", "type": "address"}, {"name": "id", "type": "uint256"}],
+        "name": "balanceOf",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [
+            {"name": "owner", "type": "address"},
+            {"name": "operator", "type": "address"},
+        ],
+        "name": "isApprovedForAll",
+        "outputs": [{"name": "", "type": "bool"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [
+            {"name": "operator", "type": "address"},
+            {"name": "approved", "type": "bool"},
+        ],
+        "name": "setApprovalForAll",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
 ]
+
+_ADAPTER_ABI = [
+    {
+        "inputs": [
+            {"name": "collateralToken", "type": "address"},
+            {"name": "parentCollectionId", "type": "bytes32"},
+            {"name": "conditionId", "type": "bytes32"},
+            {"name": "indexSets", "type": "uint256[]"},
+        ],
+        "name": "redeemPositions",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+]
+
+_BAL_ABI = [{"inputs":[{"name":"a","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"}]
+
 
 
 def _fetch_redeemable(address: str) -> list[dict]:
@@ -75,14 +122,100 @@ def fetch_outcomes(address: str, slugs: list[str]) -> list[dict]:
         return []
 
 
+def _pusd_balance(w3: Web3, address: str) -> int:
+    tok = w3.eth.contract(address=w3.to_checksum_address(_PUSD_ADDRESS), abi=_BAL_ABI)
+    return tok.functions.balanceOf(w3.to_checksum_address(address)).call()
+
+
+def _ensure_adapter_approved(w3: Web3, private_key: str, address: str, ctf) -> bool:
+    """Grant the adapter setApprovalForAll on the CTF contract (one-time, idempotent)."""
+    try:
+        if ctf.functions.isApprovedForAll(
+            w3.to_checksum_address(address),
+            w3.to_checksum_address(_ADAPTER),
+        ).call():
+            return True
+        nonce = w3.eth.get_transaction_count(address)
+        tx = ctf.functions.setApprovalForAll(
+            w3.to_checksum_address(_ADAPTER), True
+        ).build_transaction({
+            "from": address, "nonce": nonce,
+            "gas": 60_000, "gasPrice": int(w3.eth.gas_price * 1.1), "chainId": 137,
+        })
+        signed = w3.eth.account.sign_transaction(tx, private_key)
+        tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
+        if receipt.status == 1:
+            logger.info("adapter_approved", adapter=_ADAPTER, tx=tx_hash.hex())
+            return True
+        logger.warning("adapter_approval_failed", tx=tx_hash.hex())
+        return False
+    except Exception as e:
+        logger.warning("adapter_approval_error", error=str(e))
+        return False
+
+
+def _try_redeem_via_adapter(w3: Web3, private_key: str, address: str,
+                             condition_id: str, outcome_index: int) -> bool:
+    """Redeem via the USDC.e→pUSD adapter.
+
+    The adapter pulls CTF tokens using setApprovalForAll, calls redeemPositions
+    on the CTF (receiving USDC.e), wraps to pUSD, and sends pUSD to the caller.
+    Returns True if pUSD balance increased.
+    """
+    pusd_before = _pusd_balance(w3, address)
+    try:
+        adapter = w3.eth.contract(
+            address=w3.to_checksum_address(_ADAPTER), abi=_ADAPTER_ABI
+        )
+        index_set = 1 << outcome_index
+        nonce = w3.eth.get_transaction_count(address)
+        tx = adapter.functions.redeemPositions(
+            w3.to_checksum_address(_USDC_E_ADDRESS),
+            b"\x00" * 32,
+            bytes.fromhex(condition_id[2:]),
+            [index_set],
+        ).build_transaction({
+            "from": address, "nonce": nonce,
+            "gas": 300_000, "gasPrice": int(w3.eth.gas_price * 1.1), "chainId": 137,
+        })
+        signed = w3.eth.account.sign_transaction(tx, private_key)
+        tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
+        if receipt.status != 1:
+            logger.warning("adapter_redeem_tx_failed", condition_id=condition_id, tx=tx_hash.hex())
+            return False
+        pusd_after = _pusd_balance(w3, address)
+        gained = (pusd_after - pusd_before) / 1e6
+        if gained > 0:
+            logger.info("position_redeemed_via_adapter", condition_id=condition_id,
+                        pusd_gained=gained, tx=tx_hash.hex())
+            return True
+        logger.warning("adapter_no_pusd_gained", condition_id=condition_id, tx=tx_hash.hex())
+        return False
+    except Exception as e:
+        logger.warning("adapter_redeem_error", condition_id=condition_id, error=str(e))
+        return False
+
+
 def redeem_resolved_positions(private_key: str, clob_client) -> tuple[int, list[dict]]:
-    """Redeem winning positions on-chain, sync CLOB. Returns (count, outcome_list)."""
+    """Redeem winning positions on-chain, sync CLOB. Returns (count, outcome_list).
+
+    Strategy (in priority order for each winning position):
+    1. Adapter (0xADa100874d...) redeemPositions with USDC.e collateral — adapter
+       pulls CTF tokens via setApprovalForAll, redeems for USDC.e, wraps to pUSD,
+       and sends pUSD directly to the caller. No manual conversion needed.
+    2. Direct redeemPositions() fallback on the CTF — gives USDC.e which sits in
+       the EOA and requires a manual Polymarket deposit to become tradeable pUSD.
+    """
     w3 = Web3(Web3.HTTPProvider(_POLYGON_RPC))
     account = w3.eth.account.from_key(private_key)
     address = account.address
 
-    collateral = _PUSD_ADDRESS
     ctf = w3.eth.contract(address=_CTF_ADDRESS, abi=_CTF_ABI)
+
+    # Ensure adapter is approved once per session (no-op if already set)
+    _ensure_adapter_approved(w3, private_key, address, ctf)
 
     all_positions = _fetch_redeemable(address)
     if not all_positions:
@@ -100,67 +233,104 @@ def redeem_resolved_positions(private_key: str, clob_client) -> tuple[int, list[
             "entry_price": float(pos.get("avgPrice", 0)),
         })
 
-    positions = [p for p in all_positions if p.get("curPrice", 0) == 1]
+    winning_positions = [p for p in all_positions if p.get("curPrice", 0) == 1]
+    losing_positions  = [p for p in all_positions if p.get("curPrice", 0) == 0]
     redeemed = 0
-    for pos in positions:
+
+    # Clear losing positions first — burns $0-value CTF tokens so they stop
+    # appearing as "unredeemed" in the portfolio. No payout expected.
+    for pos in losing_positions:
+        condition_id = pos.get("conditionId")
+        outcome_index = pos.get("outcomeIndex", 0)
+        index_set = 1 << outcome_index
+        asset_id = pos.get("asset")
+        if not asset_id or not condition_id:
+            continue
+        on_chain_bal = ctf.functions.balanceOf(
+            w3.to_checksum_address(address), int(asset_id)
+        ).call()
+        if on_chain_bal == 0:
+            continue  # already cleared
+        try:
+            nonce = w3.eth.get_transaction_count(address)
+            tx = ctf.functions.redeemPositions(
+                w3.to_checksum_address(_USDC_E_ADDRESS),
+                b"\x00" * 32,
+                bytes.fromhex(condition_id[2:]),
+                [index_set],
+            ).build_transaction({
+                "from": address, "nonce": nonce,
+                "gas": 100_000, "gasPrice": int(w3.eth.gas_price * 1.1), "chainId": 137,
+            })
+            signed = w3.eth.account.sign_transaction(tx, private_key)
+            tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
+            if receipt.status == 1:
+                logger.info("losing_position_cleared", condition_id=condition_id,
+                            slug=pos.get("eventSlug"), tx=tx_hash.hex())
+            else:
+                logger.warning("losing_clear_failed", condition_id=condition_id, tx=tx_hash.hex())
+        except Exception as e:
+            logger.warning("losing_clear_error", condition_id=condition_id, error=str(e))
+        time.sleep(2)
+
+    for pos in winning_positions:
         condition_id = pos["conditionId"]
         outcome_index = pos.get("outcomeIndex", 0)
-        # For binary markets: outcome 0 → indexSet 1 (bit 0), outcome 1 → indexSet 2 (bit 1)
         index_set = 1 << outcome_index
+        asset_id = pos.get("asset")
 
+        # Skip if no on-chain tokens (nothing to redeem)
+        if asset_id:
+            on_chain_bal = ctf.functions.balanceOf(
+                w3.to_checksum_address(address), int(asset_id)
+            ).call()
+            if on_chain_bal == 0:
+                continue
+
+        # --- Path 1: adapter.redeemPositions(USDC.e) → pUSD ---
+        if _try_redeem_via_adapter(w3, private_key, address, condition_id, outcome_index):
+            redeemed += 1
+            time.sleep(2)
+            continue
+
+        # --- Path 2: direct CTF redeemPositions() fallback (USDC.e) ---
         for attempt in range(4):
-            delay = 2 ** attempt  # 1s, 2s, 4s, 8s
+            delay = 2 ** attempt
             try:
                 nonce = w3.eth.get_transaction_count(address)
-                gas_price = w3.eth.gas_price
-
                 tx = ctf.functions.redeemPositions(
-                    w3.to_checksum_address(collateral),
-                    b"\x00" * 32,  # parentCollectionId = bytes32(0)
+                    w3.to_checksum_address(_USDC_E_ADDRESS),
+                    b"\x00" * 32,
                     bytes.fromhex(condition_id[2:]),
                     [index_set],
                 ).build_transaction({
-                    "from": address,
-                    "nonce": nonce,
-                    "gas": 150_000,
-                    "gasPrice": int(gas_price * 1.1),
-                    "chainId": 137,  # Polygon
+                    "from": address, "nonce": nonce,
+                    "gas": 150_000, "gasPrice": int(w3.eth.gas_price * 1.1), "chainId": 137,
                 })
-
                 signed = w3.eth.account.sign_transaction(tx, private_key)
                 tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
                 receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
-
                 if receipt.status == 1:
-                    logger.info(
-                        "position_redeemed",
-                        condition_id=condition_id,
-                        size=pos.get("size"),
-                        tx=tx_hash.hex(),
-                    )
+                    logger.info("position_redeemed_usdc_e", condition_id=condition_id,
+                                size=pos.get("size"), tx=tx_hash.hex())
                     redeemed += 1
                 else:
                     logger.warning("redeem_tx_failed", condition_id=condition_id, tx=tx_hash.hex())
                 break
-
             except Exception as e:
                 if attempt < 3:
-                    logger.warning(
-                        "redeem_retry",
-                        condition_id=condition_id,
-                        attempt=attempt + 1,
-                        delay=delay,
-                        error=str(e),
-                    )
+                    logger.warning("redeem_retry", condition_id=condition_id,
+                                   attempt=attempt + 1, delay=delay, error=str(e))
                     time.sleep(delay)
                 else:
                     logger.error("redeem_error", condition_id=condition_id, error=str(e))
 
-        time.sleep(2)  # avoid nonce collisions between transactions
+        time.sleep(2)
 
     if redeemed > 0:
         try:
-            from py_clob_client.clob_types import AssetType, BalanceAllowanceParams
+            from py_clob_client_v2.clob_types import AssetType, BalanceAllowanceParams
             params = BalanceAllowanceParams(asset_type=AssetType.COLLATERAL)
             clob_client.update_balance_allowance(params=params)
             logger.info("clob_balance_synced_after_redeem", redeemed=redeemed)

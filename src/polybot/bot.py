@@ -29,7 +29,7 @@ _BTC_FALLBACK = {
     },
     "futures_url": "https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT",
     "chainlink_aggregator": "0xc907E116054Ad103354f2D350FD2514433D57F6f",
-    "chainlink_rpc_url": "https://1rpc.io/matic",
+    "chainlink_rpc_url": "https://polygon.drpc.org",
 }
 
 

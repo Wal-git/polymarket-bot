@@ -382,7 +382,7 @@ class MarketLifecycle:
                 from polybot.execution.redeem import fetch_outcomes
                 from polybot.auth.wallet import get_private_key as _gpk
                 _pk = _gpk()
-                _addr = Web3(Web3.HTTPProvider("https://1rpc.io/matic")).eth.account.from_key(_pk).address
+                _addr = Web3(Web3.HTTPProvider("https://polygon.drpc.org")).eth.account.from_key(_pk).address
                 for _attempt in range(5):
                     fallback = fetch_outcomes(_addr, [self.slot.slug])
                     for outcome in fallback:

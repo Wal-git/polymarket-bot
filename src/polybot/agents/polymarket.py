@@ -14,19 +14,19 @@ from web3.constants import MAX_INT
 from web3.middleware import geth_poa_middleware
 
 import httpx
-from py_clob_client.client import ClobClient
-from py_clob_client.clob_types import ApiCreds
-from py_clob_client.constants import AMOY, POLYGON
+from py_clob_client_v2.client import ClobClient
+from py_clob_client_v2.clob_types import ApiCreds
+from py_clob_client_v2.constants import AMOY, POLYGON
 from py_order_utils.builders import OrderBuilder
 from py_order_utils.model import OrderData
 from py_order_utils.signer import Signer
-from py_clob_client.clob_types import (
+from py_clob_client_v2.clob_types import (
     OrderArgs,
     MarketOrderArgs,
     OrderType,
     OrderBookSummary,
 )
-from py_clob_client.order_builder.constants import BUY
+from py_clob_client_v2.order_builder.constants import BUY
 
 from agents.utils.objects import SimpleMarket, SimpleEvent
 
@@ -44,7 +44,7 @@ class Polymarket:
 
         self.chain_id = 137  # POLYGON
         self.private_key = os.getenv("POLYGON_WALLET_PRIVATE_KEY")
-        self.polygon_rpc = "https://polygon-rpc.com"
+        self.polygon_rpc = "https://polygon.drpc.org"
         self.w3 = Web3(Web3.HTTPProvider(self.polygon_rpc))
 
         self.exchange_address = "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e"
@@ -457,7 +457,7 @@ if __name__ == "__main__":
     
     """
 
-    # https://polygon-rpc.com
+    # https://polygon.drpc.org
 
     test_market_token_id = (
         "101669189743438912873361127612589311253202068943959811456820079057046819967115"
