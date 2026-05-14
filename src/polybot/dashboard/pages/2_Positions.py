@@ -48,6 +48,12 @@ else:
     for t in reversed(trades):
         slug = t.get("market_question", "")
         result = results.get(slug)
+        if slug.startswith("eth-"):
+            asset = "ETH"
+        elif slug.startswith("btc-"):
+            asset = "BTC"
+        else:
+            asset = (result or {}).get("asset", "BTC") if result else "BTC"
         won = result.get("won") if result else None
         pnl = result.get("pnl") if result else None
 
@@ -73,7 +79,7 @@ else:
 
         rows.append({
             "Time (PDT)": _to_pdt(t.get("timestamp", "")),
-            "Asset": (result or {}).get("asset", "BTC") if result else "BTC",
+            "Asset": asset,
             "Market": strip_slug_prefix(slug),
             "Direction": t.get("side", ""),
             "Shares": f"{float(t.get('size') or 0):.2f}",
