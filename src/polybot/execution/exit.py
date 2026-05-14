@@ -30,10 +30,15 @@ async def _wait_for_entry_fill(
     fires a SELL for shares the proxy doesn't yet hold, and the CLOB rejects
     with "balance: 0, order amount: X".
     """
+    # Polymarket rounds CTF share balances to 2 decimal places, but the local
+    # expected size is computed at 4 decimals (size_usdc / price). Without a
+    # tolerance, an order for 33.3333 shares fills as 33.33 on-chain and the
+    # check 33.33 >= 33.3333 fails forever → false entry_fill_timeout.
+    fill_tolerance = Decimal("0.01")
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         held = clob.get_conditional_balance(token_id)
-        if held >= expected_shares:
+        if held >= expected_shares - fill_tolerance:
             logger.info(
                 "entry_fill_confirmed",
                 slug=slot.slug,

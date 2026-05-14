@@ -439,6 +439,7 @@ def reconcile_resolved_positions(tracker, grace_secs: int = 300) -> int:
             pnl = round(shares * (1.0 - entry), 4) if won else round(-shares * entry, 4)
             emit_result(
                 slug=slug,
+                asset="ETH" if slug.startswith("eth-") else "BTC",
                 won=won,
                 pnl=pnl,
                 shares=shares,
