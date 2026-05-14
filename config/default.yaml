@@ -25,8 +25,9 @@ assets:
     chainlink_aggregator: "0xc907E116054Ad103354f2D350FD2514433D57F6f"  # Polygon BTC/USD
     chainlink_rpc_url: "https://polygon.drpc.org"
     calibration_table_path: "data/calibration_table.json"
-    eval_only: true                   # paused
-    # No threshold overrides — BTC uses the strategy.signals defaults below.
+    eval_only: false                  # live trading enabled 2026-05-14
+    thresholds:
+      min_agreement: 4                # raised from default 2 → 4 on 2026-05-14
 
   ETH:
     # Polymarket lists 5-min ETH up/down markets on the same grid as BTC.
