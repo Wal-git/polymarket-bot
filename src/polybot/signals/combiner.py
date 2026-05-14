@@ -377,8 +377,18 @@ def should_trade(
         )
         return None
 
-    base_min_usdc = _override("min_trade_usdc", float(siz_cfg.get("min_trade_usdc", 10.0)))
-    base_max_usdc = _override("max_trade_usdc", float(siz_cfg.get("max_trade_usdc", 200.0)))
+    # Strategy floors scale with bankroll (min_trade_pct, max_trade_pct).
+    # Per-asset USD overrides (asset.thresholds.min_trade_usdc / max_trade_usdc)
+    # still win when present — used for one-off manual sizing injections that
+    # the scheduler strips after first fill.
+    base_min_usdc = _override(
+        "min_trade_usdc",
+        bankroll * float(siz_cfg.get("min_trade_pct", 0.30)),
+    )
+    base_max_usdc = _override(
+        "max_trade_usdc",
+        bankroll * float(siz_cfg.get("max_trade_pct", 1.0)),
+    )
     double_min_threshold = _override(
         "double_min_above_usd", siz_cfg.get("double_min_above_usd", 200.0)
     )

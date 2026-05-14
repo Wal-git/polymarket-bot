@@ -117,8 +117,12 @@ strategy:
   sizing:
     mode: kelly
     kelly_fraction: 0.25            # quarter-Kelly safety cap
-    min_trade_usdc: 30
-    max_trade_usdc: 200
+    # Bankroll-relative floors (derived from the original $30 min on a $100 bankroll).
+    # base_min_usdc = bankroll * min_trade_pct ; base_max_usdc = bankroll * max_trade_pct.
+    # Per-asset overrides in `assets.*.thresholds.min_trade_usdc` (absolute dollars)
+    # still win and are used as one-off injections.
+    min_trade_pct: 0.30
+    max_trade_pct: 1.00
     min_confidence: 0.80            # reject trades below this confidence
     min_entry_price: 0.80           # reject trades when orderbook YES isn't already 0.80+;
                                     # see scripts/backfill_slot_history.py + analysis 2026-04-28
@@ -132,6 +136,6 @@ strategy:
 
 risk:
   max_open_positions: 2
-  daily_loss_limit_usdc: 100        # kill switch: stop new entries at -$100/day
+  daily_loss_limit_pct: 1.0         # kill switch: halt at -100% of startup bankroll/day
   max_total_exposure_pct: 0.50
-  max_position_usdc: 200
+  max_position_pct: 2.0             # max single position = 2× bankroll (currently unused — RiskManager isn't wired in)

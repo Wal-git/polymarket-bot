@@ -11,13 +11,13 @@ class RiskManager:
     def __init__(
         self,
         max_total_exposure_pct: float = 0.20,
-        max_position_usdc: float = 200,
-        max_single_bet_usdc: float = 50,
+        max_position_pct: float = 2.0,
+        max_single_bet_pct: float = 0.5,
         stop_loss_pct: float = 0.30,
     ):
         self._max_exposure_pct = Decimal(str(max_total_exposure_pct))
-        self._max_position = Decimal(str(max_position_usdc))
-        self._max_bet = Decimal(str(max_single_bet_usdc))
+        self._max_position_pct = Decimal(str(max_position_pct))
+        self._max_bet_pct = Decimal(str(max_single_bet_pct))
         self._stop_loss_pct = Decimal(str(stop_loss_pct))
 
     def validate_signals(
@@ -35,6 +35,8 @@ class RiskManager:
         current_exposure = sum(p.shares * p.avg_entry_price for p in positions)
         max_exposure = balance * self._max_exposure_pct
         remaining = max_exposure - current_exposure
+        max_bet = balance * self._max_bet_pct
+        max_position = balance * self._max_position_pct
 
         approved: list[SignalSet] = []
         rejections: dict[str, str] = {}
@@ -47,17 +49,17 @@ class RiskManager:
                     valid_orders.append(order)
                     continue
 
-                if order.size > self._max_bet:
-                    logger.warning("order_capped", original=str(order.size), cap=str(self._max_bet))
-                    order = order.model_copy(update={"size": self._max_bet})
+                if order.size > max_bet:
+                    logger.warning("order_capped", original=str(order.size), cap=str(max_bet))
+                    order = order.model_copy(update={"size": max_bet})
 
                 token_exposure = sum(
                     p.shares * p.avg_entry_price
                     for p in positions
                     if p.token_id == order.token_id
                 )
-                if token_exposure + order.size > self._max_position:
-                    allowed = self._max_position - token_exposure
+                if token_exposure + order.size > max_position:
+                    allowed = max_position - token_exposure
                     if allowed <= 0:
                         logger.warning("position_limit_hit", token_id=order.token_id)
                         reasons.append("position cap")
