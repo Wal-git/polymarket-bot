@@ -148,6 +148,12 @@ def build_engine(config_path: str = "config/default.yaml") -> MultiAssetEngine:
     state_file = bot_cfg.get("state_file", "./data/state.json")
     tracker = PositionTracker(state_file=state_file)
 
+    # Anchor the daily-loss kill switch to startup bankroll. balance fetch
+    # returns 0 on failure; fall back to $100 so a transient API hiccup doesn't
+    # set the threshold to zero (which would halt on the first cent of P&L).
+    startup_balance = float(clob.get_balance()) or 100.0
+    loss_pct = float(risk_cfg.get("daily_loss_limit_pct", 1.0))
+
     return MultiAssetEngine(
         clob=clob,
         tracker=tracker,
@@ -155,6 +161,6 @@ def build_engine(config_path: str = "config/default.yaml") -> MultiAssetEngine:
         config=config,
         assets=_build_asset_specs(config),
         halt_file=bot_cfg.get("halt_file", "./HALT"),
-        daily_loss_limit=float(risk_cfg.get("daily_loss_limit_usdc", 100.0)),
+        daily_loss_limit=startup_balance * loss_pct,
         config_path=config_path,
     )
