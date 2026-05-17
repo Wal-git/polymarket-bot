@@ -81,6 +81,10 @@ strategy:
                                     # from hard-dissent (no exchange ever moves past −min_gap when
                                     # others are past +min_gap at this threshold).
       require_chainlink_gap: true
+      max_chainlink_lag_s: 25         # 2026-05-16: reject when Polygon Chainlink round
+                                      # is older than this. 9.8k-slot analysis showed
+                                      # 30-60s lag drops accuracy from 93→78% (BTC) /
+                                      # 88→80% (ETH). Set to 0 to disable.
     imbalance:
       buy_threshold: 1.8            # retained for data capture only — not used as a trade gate
       sell_threshold: 0.55
@@ -106,6 +110,11 @@ strategy:
     window_seconds: [60, 180]       # skip signals outside this range after market open
     order_type: LIMIT
     price: best_ask
+    # 2026-05-16: skip these UTC hours — full-history analysis showed they account
+    # for the largest realized losses. Hour 15 (NY open) had 16 trades/-$139,
+    # hours 7-8 (EU AM) had 13 trades/-$229. Signal accuracy in these windows is
+    # also lowest (78-85% vs 95-100% elsewhere). Empty list disables.
+    skip_hours_utc: [7, 8, 15]
 
   exit:
     # profit_target removed 2026-05-14: with min_entry_price=0.80, any target

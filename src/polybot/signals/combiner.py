@@ -47,6 +47,7 @@ def should_trade(
     div_cfg = sig_cfg.get("divergence", {})
     imb_cfg = sig_cfg.get("imbalance", {})
     siz_cfg = config.get("sizing", {})
+    entry_cfg = config.get("entry", {})
 
     # Per-asset threshold overrides take precedence over the strategy block.
     asset_thresholds = asset.thresholds if asset is not None else None
@@ -209,6 +210,19 @@ def should_trade(
             **_macro_diag, **extra
         )
 
+    # Time-of-day gate: skip UTC hours that historically lose money even when
+    # the signal fires (added 2026-05-16 — see analysis in repo notes).
+    skip_hours = entry_cfg.get("skip_hours_utc") or []
+    if skip_hours:
+        current_hour_utc = time.gmtime().tm_hour
+        if current_hour_utc in skip_hours:
+            _emit(
+                div_direction=None, imb_direction=None, confluence=False, fast_pass=False,
+                confidence=None, size_usdc=None, direction=None,
+                reject_reason="hour_filter",
+            )
+            return None
+
     # If no exchanges responded at all, we can't evaluate
     if not deltas:
         logger.warning("no_exchange_prices", slug=slot.slug)
@@ -267,6 +281,23 @@ def should_trade(
             reject_reason="no_divergence",
         )
         return None
+
+    # Chainlink staleness gate: when the Polygon oracle round is older than
+    # max_chainlink_lag_s, divergence accuracy drops sharply (added 2026-05-16,
+    # see analysis in repo notes). Set max_chainlink_lag_s: 0 to disable.
+    max_cl_lag = float(div_cfg.get("max_chainlink_lag_s", 0.0))
+    if max_cl_lag > 0 and chainlink is not None:
+        cl_lag_now = time.time() - chainlink.updated_at
+        if cl_lag_now > max_cl_lag:
+            logger.debug("chainlink_stale", slug=slot.slug,
+                         lag_s=round(cl_lag_now, 1), max_lag=max_cl_lag)
+            _emit(
+                div_direction=direction.value,
+                imb_direction=None, confluence=False, fast_pass=fast_pass_triggered,
+                confidence=None, size_usdc=None, direction=None,
+                reject_reason="chainlink_stale",
+            )
+            return None
 
     # Capture imbalance snapshot for diagnostics (not a gate)
     imb_direction = detect_smart_entry(history, threshold_buy, threshold_sell, window)
