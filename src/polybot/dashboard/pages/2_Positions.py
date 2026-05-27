@@ -29,7 +29,7 @@ PDT = timezone(timedelta(hours=-7))
 def _to_pdt(iso: str) -> str:
     try:
         dt = datetime.fromisoformat(iso).astimezone(PDT)
-        return dt.strftime("%-I:%M %p")
+        return dt.strftime("%-m/%-d %-I:%M %p")
     except Exception:
         return iso[:19]
 
@@ -46,6 +46,8 @@ else:
     losses = 0
 
     for t in reversed(trades):
+        if t.get("side") != "BUY":
+            continue
         slug = t.get("market_question", "")
         result = results.get(slug)
         if slug.startswith("eth-"):
@@ -91,19 +93,24 @@ else:
             "P&L %": pnl_pct_str,
         })
 
-    # Summary KPIs
+    # Summary KPIs — use all results as source of truth (includes trades
+    # no longer in state.json, e.g. old slots or manual bets).
+    all_wins = sum(1 for r in results.values() if r.get("won"))
+    all_losses = sum(1 for r in results.values() if not r.get("won"))
+    total_pnl = sum(r.get("pnl", 0) for r in results.values())
+
     c1, c2, c3, c4 = st.columns(4)
     pnl_color = "#0ECB81" if total_pnl >= 0 else "#F6465D"
     pnl_sign = "+" if total_pnl >= 0 else ""
     with c1:
         st.markdown(f"""<div class="kpi-block"><div class="kpi-label">Trades</div>
-        <div class="kpi-value">{len(rows)}</div></div>""", unsafe_allow_html=True)
+        <div class="kpi-value">{all_wins + all_losses}</div></div>""", unsafe_allow_html=True)
     with c2:
         st.markdown(f"""<div class="kpi-block"><div class="kpi-label">Wins</div>
-        <div class="kpi-value" style="color:#0ECB81">{wins}</div></div>""", unsafe_allow_html=True)
+        <div class="kpi-value" style="color:#0ECB81">{all_wins}</div></div>""", unsafe_allow_html=True)
     with c3:
         st.markdown(f"""<div class="kpi-block"><div class="kpi-label">Losses</div>
-        <div class="kpi-value" style="color:#F6465D">{losses}</div></div>""", unsafe_allow_html=True)
+        <div class="kpi-value" style="color:#F6465D">{all_losses}</div></div>""", unsafe_allow_html=True)
     with c4:
         net_pct = total_pnl / STARTING_BALANCE * 100
         st.markdown(f"""<div class="kpi-block"><div class="kpi-label">Net P&L</div>
