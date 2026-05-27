@@ -68,6 +68,7 @@ async def monitor_position(
     dry_run: bool,
     stop_loss: float = 0.35,
     hold_to_resolution_secs: float = 60.0,
+    order_id: Optional[str] = None,
 ) -> ExitResult:
     """Poll every 2 seconds. Exit only on stop-loss or hold-to-resolution.
 
@@ -81,7 +82,30 @@ async def monitor_position(
         expected = pos.shares if pos is not None else Decimal("0")
         filled = await _wait_for_entry_fill(token_id, expected, clob, slot)
         if not filled:
-            return ExitResult(reason=ExitReason.HOLD_TO_RESOLUTION, pnl=None)
+            held = clob.get_conditional_balance(token_id)
+            if held <= 0 and order_id:
+                order_info = clob.get_order(order_id)
+                size_matched = Decimal(order_info.get("size_matched", "0")) if order_info else Decimal("0")
+                if size_matched <= 0:
+                    logger.warning(
+                        "order_unfilled_cleanup",
+                        slug=slot.slug,
+                        token_id=token_id,
+                        order_id=order_id,
+                    )
+                    clob.cancel_order(order_id)
+                    tracker.close_position(token_id)
+                    tracker.save()
+                    return ExitResult(reason=ExitReason.UNFILLED, pnl=None)
+            if held <= 0:
+                logger.warning(
+                    "order_unfilled_cleanup_no_order_id",
+                    slug=slot.slug,
+                    token_id=token_id,
+                )
+                tracker.close_position(token_id)
+                tracker.save()
+                return ExitResult(reason=ExitReason.UNFILLED, pnl=None)
 
     while True:
         time_remaining = slot.end_ms / 1000 - time.time()

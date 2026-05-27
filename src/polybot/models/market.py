@@ -13,6 +13,7 @@ class ExitReason(str, Enum):
     STOP_LOSS = "STOP_LOSS"
     HOLD_TO_RESOLUTION = "HOLD_TO_RESOLUTION"
     TIME_EXPIRED = "TIME_EXPIRED"
+    UNFILLED = "UNFILLED"
 
 
 _EXCHANGE_NAMES = ("binance", "coinbase", "kraken", "bitstamp", "okx")

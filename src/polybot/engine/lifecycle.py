@@ -313,9 +313,29 @@ class MarketLifecycle:
             dry_run=self._dry_run,
             stop_loss=float(exit_cfg.get("stop_loss", 0.35)),
             hold_to_resolution_secs=float(exit_cfg.get("hold_to_resolution_s_remaining", 60.0)),
+            order_id=order_id,
         )
 
         self.pnl = result.pnl
+        if result.reason == ExitReason.UNFILLED:
+            logger.info(
+                "trade_unfilled",
+                slug=self.slot.slug,
+                asset=self.asset.name,
+            )
+            from polybot.monitoring.event_log import emit_execution
+            emit_execution(
+                slug=self.slot.slug,
+                asset=self.asset.name,
+                status="unfilled",
+                direction=signal.direction.value,
+                confidence=signal.confidence,
+                size_usdc=round(signal.size_usdc, 2),
+                order_id=order_id or "",
+            )
+            self._state = LifecycleState.RESOLVED
+            return
+
         if result.reason != ExitReason.HOLD_TO_RESOLUTION:
             pnl_str = f"+${result.pnl:.2f}" if (result.pnl or 0) >= 0 else f"-${abs(result.pnl or 0):.2f}"
             logger.info(
@@ -378,11 +398,9 @@ class MarketLifecycle:
             if not matched:
                 # API may lag behind on-chain resolution — retry a few times before giving up.
                 from polybot.execution.redeem import fetch_outcomes
-                from polybot.auth.wallet import get_private_key as _gpk
-                _pk = _gpk()
-                _addr = Web3(Web3.HTTPProvider("https://polygon.drpc.org")).eth.account.from_key(_pk).address
+                from polybot.client.clob import DEPOSIT_WALLET
                 for _attempt in range(5):
-                    fallback = fetch_outcomes(_addr, [self.slot.slug])
+                    fallback = fetch_outcomes(DEPOSIT_WALLET, [self.slot.slug])
                     for outcome in fallback:
                         if outcome.get("slug") == self.slot.slug:
                             matched = True

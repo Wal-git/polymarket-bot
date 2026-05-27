@@ -181,6 +181,13 @@ class CLOBClient:
         logger.info("order_placed", order_id=order_id, token_id=order.token_id)
         return order_id
 
+    def get_order(self, order_id: str) -> Optional[dict]:
+        try:
+            return self.client.get_order(order_id)
+        except Exception as e:
+            logger.warning("get_order_failed", order_id=order_id, error=str(e))
+            return None
+
     def cancel_order(self, order_id: str):
         resp = self.client.cancel_orders([order_id])
         cancelled = (resp.get("canceled") or []) if isinstance(resp, dict) else []
