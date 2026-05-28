@@ -71,6 +71,8 @@ def _build_asset_specs(config: dict) -> list[AssetSpec]:
                     min_agreement=thresholds_block.get("min_agreement"),
                     min_trade_usdc=thresholds_block.get("min_trade_usdc"),
                     max_trade_usdc=thresholds_block.get("max_trade_usdc"),
+                    skip_hours_utc=tuple(thresholds_block["skip_hours_utc"])
+                    if thresholds_block.get("skip_hours_utc") is not None else None,
                 ),
             )
         )

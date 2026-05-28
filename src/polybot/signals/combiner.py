@@ -211,8 +211,11 @@ def should_trade(
         )
 
     # Time-of-day gate: skip UTC hours that historically lose money even when
-    # the signal fires (added 2026-05-16 — see analysis in repo notes).
-    skip_hours = entry_cfg.get("skip_hours_utc") or []
+    # the signal fires (added 2026-05-16 — see analysis in repo notes). Per-asset
+    # override (assets.<name>.thresholds.skip_hours_utc) wins over the global list;
+    # set to [] in the per-asset block to opt the asset out of all hour filtering.
+    asset_skip = asset_thresholds.skip_hours_utc if asset_thresholds is not None else None
+    skip_hours = list(asset_skip) if asset_skip is not None else (entry_cfg.get("skip_hours_utc") or [])
     if skip_hours:
         current_hour_utc = time.gmtime().tm_hour
         if current_hour_utc in skip_hours:

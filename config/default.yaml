@@ -28,6 +28,10 @@ assets:
     eval_only: false                  # live trading enabled 2026-05-14
     thresholds:
       min_agreement: 4                # raised from default 2 → 4 on 2026-05-14
+      # 2026-05-28: added hour 17 (NY mid-afternoon) on top of the global
+      # [7,8,15] filter — 14/21/30d replay all show a stable +$42 from
+      # excluding hour 17 on BTC only. ETH at hour 17 stays on (it wins there).
+      skip_hours_utc: [7, 8, 15, 17]
 
   ETH:
     # Polymarket lists 5-min ETH up/down markets on the same grid as BTC.

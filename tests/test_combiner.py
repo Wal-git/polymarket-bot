@@ -590,3 +590,67 @@ class TestEntryPriceGate:
         assert evals[-1]["reject_reason"] == "no_divergence"
         assert evals[-1]["up_best_ask"] == 0.51
         assert evals[-1]["down_best_ask"] == 0.51
+
+
+class TestHourFilter:
+    def _cfg(self, skip_hours):
+        return {
+            "signals": {
+                "divergence": {"min_gap_usd": 100.0, "max_gap_usd": 0.0, "fast_pass_usd": 125.0},
+                "imbalance": {"buy_threshold": 1.8, "sell_threshold": 0.55,
+                              "detection_window_seconds": [30, 90], "depth_levels": 10},
+            },
+            "sizing": {"kelly_fraction": 0.25, "min_trade_usdc": 10, "max_trade_usdc": 200},
+            "entry": {"skip_hours_utc": skip_hours},
+        }
+
+    def _asset(self, name, skip_hours_utc):
+        from polybot.models.asset import AssetSpec, AssetThresholds
+        return AssetSpec(
+            name=name, slug_prefix=f"{name.lower()}-updown-5m",
+            slot_base_timestamp=1772568900,
+            thresholds=AssetThresholds(skip_hours_utc=skip_hours_utc),
+        )
+
+    def _fire(self, monkeypatch, tmp_path, hour, *, asset=None, global_skip=()):
+        import polybot.monitoring.event_log as event_log
+        monkeypatch.setattr(event_log, "_DEFAULT_EVALS", tmp_path / "evals.jsonl")
+        # Pin time.gmtime so the combiner sees ``hour`` as the current UTC hour.
+        import time as _time
+        from polybot.signals import combiner as _combiner
+
+        class _Tm:
+            tm_hour = hour
+        monkeypatch.setattr(_combiner.time, "gmtime", lambda: _Tm())
+        prices = _prices(95_120, 95_110)
+        ws = _mock_book_ws(imbalance_ratio=2.0, secs=60.0)
+        return should_trade(
+            prices, ws, _slot(95_000), bankroll=2000.0,
+            config=self._cfg(list(global_skip)), asset=asset,
+        )
+
+    def test_global_skip_hours_blocks_listed_hour(self, tmp_path, monkeypatch):
+        result = self._fire(monkeypatch, tmp_path, hour=8, global_skip=(7, 8, 15))
+        assert result is None
+
+    def test_global_skip_hours_allows_other_hours(self, tmp_path, monkeypatch):
+        result = self._fire(monkeypatch, tmp_path, hour=20, global_skip=(7, 8, 15))
+        assert result is not None
+
+    def test_per_asset_skip_overrides_global(self, tmp_path, monkeypatch):
+        # Global allows hour 17; BTC override lists it → BTC rejects.
+        btc = self._asset("BTC", (7, 8, 15, 17))
+        result = self._fire(monkeypatch, tmp_path, hour=17, asset=btc, global_skip=(7, 8, 15))
+        assert result is None
+
+    def test_per_asset_skip_does_not_affect_other_asset(self, tmp_path, monkeypatch):
+        # ETH has no per-asset list → falls back to global (which lacks 17).
+        eth = self._asset("ETH", None)
+        result = self._fire(monkeypatch, tmp_path, hour=17, asset=eth, global_skip=(7, 8, 15))
+        assert result is not None
+
+    def test_per_asset_empty_list_disables_filter_for_asset(self, tmp_path, monkeypatch):
+        # Global blocks hour 8; per-asset [] opts that asset out of all hour gating.
+        eth = self._asset("ETH", ())
+        result = self._fire(monkeypatch, tmp_path, hour=8, asset=eth, global_skip=(7, 8, 15))
+        assert result is not None

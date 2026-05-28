@@ -35,6 +35,10 @@ class AssetThresholds:
     min_agreement: Optional[int] = None
     min_trade_usdc: Optional[float] = None
     max_trade_usdc: Optional[float] = None
+    # Per-asset UTC hours to skip. When None, falls back to strategy.entry.skip_hours_utc.
+    # When set (even to an empty tuple), overrides the global list — so an asset can opt
+    # out of hours the other asset blocks (e.g. BTC blocks hour 17 while ETH still trades it).
+    skip_hours_utc: Optional[tuple[int, ...]] = None
 
 
 @dataclass(frozen=True)
