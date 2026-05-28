@@ -46,6 +46,7 @@ class MarketLifecycle:
         dry_run: bool,
         config: dict,
         on_fill: Optional[Callable[[], None]] = None,
+        on_signal: Optional[Callable[[str], None]] = None,
     ) -> None:
         self.slot = slot
         self.asset = asset
@@ -54,6 +55,7 @@ class MarketLifecycle:
         self._dry_run = dry_run
         self._config = config
         self._on_fill = on_fill
+        self._on_signal = on_signal
         self._signal: Optional[object] = None  # set when should_trade fires; used by error handler
         self._state = LifecycleState.INIT
         self._book_ws = OrderBookWS()
@@ -294,6 +296,8 @@ class MarketLifecycle:
 
         if not self._dry_run and order_id and self._on_fill:
             self._on_fill()
+        if not self._dry_run and order_id and self._on_signal:
+            self._on_signal(signal.direction.value)
 
         token_id = (
             self.slot.up_token_id
@@ -358,7 +362,16 @@ class MarketLifecycle:
                 hold_duration_s=round(time.time() - signal_ts, 1),
             )
         else:
-            # Market resolved — redeem winning CTF tokens on-chain then sync CLOB
+            # Market resolved — redeem winning CTF tokens on-chain then sync CLOB.
+            # `monitor_position` returns HOLD_TO_RESOLUTION up to `hold_to_resolution_s_remaining`
+            # seconds *before* the slot actually closes, so the position is not yet
+            # redeemable and the data-api still reflects the live (pre-settlement)
+            # orderbook. Wait past slot close before querying outcomes — otherwise
+            # the fallback path records a phantom "loss" from mid-flight prices.
+            slot_close_grace_s = 5.0
+            wait_s = self.slot.end_ms / 1000 - time.time() + slot_close_grace_s
+            if wait_s > 0:
+                await asyncio.sleep(wait_s)
             from polybot.execution.redeem import maybe_redeem
             from polybot.auth.wallet import get_private_key
             from polybot.monitoring.event_log import emit_result

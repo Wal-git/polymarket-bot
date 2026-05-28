@@ -12,6 +12,8 @@ import httpx
 import structlog
 from web3 import Web3
 
+from polybot.client.clob import DEPOSIT_WALLET
+
 logger = structlog.get_logger()
 
 _CTF_ADDRESS    = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
@@ -95,7 +97,14 @@ def _fetch_redeemable(address: str) -> list[dict]:
 
 
 def fetch_outcomes(address: str, slugs: list[str]) -> list[dict]:
-    """Return win/loss outcome records for a list of slugs."""
+    """Return win/loss outcome records for a list of slugs.
+
+    Only emits a record when the position looks definitively settled:
+    `redeemable=True` (market resolved, winning shares unclaimed). An
+    open-but-low-priced position can otherwise look identical to a
+    post-resolution loss via this endpoint (curPrice=0, small cashPnl), so
+    losses are deferred to the gamma-api-based reconcile pass.
+    """
     try:
         r = httpx.get(
             f"{_DATA_API}/positions?user={address}&sizeThreshold=0",
@@ -105,17 +114,20 @@ def fetch_outcomes(address: str, slugs: list[str]) -> list[dict]:
         slug_set = set(slugs)
         results = []
         for p in positions:
-            if p.get("eventSlug") in slug_set:
-                won = p.get("curPrice", 0) == 1
-                pnl = round(float(p.get("cashPnl", 0)), 4)
-                results.append({
-                    "slug": p["eventSlug"],
-                    "won": won,
-                    "pnl": pnl,
-                    "shares": float(p.get("size", 0)),
-                    "entry_price": float(p.get("avgPrice", 0)),
-                    "payout": round(float(p.get("size", 0)) if won else 0.0, 4),
-                })
+            if p.get("eventSlug") not in slug_set:
+                continue
+            if not p.get("redeemable"):
+                continue
+            shares = float(p.get("size", 0))
+            entry = float(p.get("avgPrice", 0))
+            results.append({
+                "slug": p["eventSlug"],
+                "won": True,
+                "pnl": round(shares * (1.0 - entry), 4),
+                "shares": shares,
+                "entry_price": entry,
+                "payout": round(shares, 4),
+            })
         return results
     except Exception as e:
         logger.warning("fetch_outcomes_failed", error=str(e))
@@ -217,7 +229,7 @@ def redeem_resolved_positions(private_key: str, clob_client) -> tuple[int, list[
     # Ensure adapter is approved once per session (no-op if already set)
     _ensure_adapter_approved(w3, private_key, address, ctf)
 
-    all_positions = _fetch_redeemable(address)
+    all_positions = _fetch_redeemable(DEPOSIT_WALLET)
     if not all_positions:
         logger.info("no_redeemable_positions")
         return 0, []
