@@ -67,6 +67,7 @@ def _build_asset_specs(config: dict) -> list[AssetSpec]:
                     if thresholds_block.get("delta_buckets") else None,
                     deep_gap_usd=thresholds_block.get("deep_gap_usd"),
                     deep_gap_min_entry=thresholds_block.get("deep_gap_min_entry"),
+                    min_entry_price=thresholds_block.get("min_entry_price"),
                     min_confidence=thresholds_block.get("min_confidence"),
                     min_agreement=thresholds_block.get("min_agreement"),
                     min_trade_usdc=thresholds_block.get("min_trade_usdc"),

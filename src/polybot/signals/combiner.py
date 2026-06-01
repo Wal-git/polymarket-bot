@@ -318,7 +318,7 @@ def should_trade(
     # delta exceeds deep_gap_usd — in that case the floor drops to
     # deep_gap_min_entry, allowing high-conviction signals to trade at lower
     # market prices where the upside is larger.
-    min_entry_price = float(siz_cfg.get("min_entry_price", 0.0))
+    min_entry_price = _override("min_entry_price", siz_cfg.get("min_entry_price", 0.0))
     max_entry_price = float(siz_cfg.get("max_entry_price", 0.0))
     deep_gap_triggered = (
         deep_gap_usd > 0
