@@ -27,11 +27,15 @@ assets:
     calibration_table_path: "data/calibration_table.json"
     eval_only: false                  # live trading enabled 2026-05-14
     thresholds:
-      min_agreement: 4                # raised from default 2 → 4 on 2026-05-14
-      # 2026-05-28: added hour 17 (NY mid-afternoon) on top of the global
-      # [7,8,15] filter — 14/21/30d replay all show a stable +$42 from
-      # excluding hour 17 on BTC only. ETH at hour 17 stays on (it wins there).
-      skip_hours_utc: [7, 8, 15, 17]
+      # 2026-06-01: lowered 4→3 after 30d backtest showed marginal 3-of-5
+      # fires (56 trades) at 91% WR / +$125, with hour 14 the dominant loser
+      # (3 trades / 33% WR / -$79). Net +$205 on 30d when 14 is also skipped.
+      min_agreement: 3
+      # Hour 14 added 2026-06-01 alongside the agr=4→3 change (see above).
+      # Prior additions: hour 17 (2026-05-28, +$42 BTC-only on 14/21/30d
+      # replay); global [7,8,15] (2026-05-16 drawdown analysis). ETH stays
+      # on the global [7,8,15] list.
+      skip_hours_utc: [7, 8, 14, 15, 17]
 
   ETH:
     # Polymarket lists 5-min ETH up/down markets on the same grid as BTC.
