@@ -31,6 +31,7 @@ class AssetThresholds:
     # Lets high-conviction divergences trade at lower market prices (higher upside).
     deep_gap_usd: Optional[float] = None
     deep_gap_min_entry: Optional[float] = None
+    min_entry_price: Optional[float] = None
     min_confidence: Optional[float] = None
     min_agreement: Optional[int] = None
     min_trade_usdc: Optional[float] = None

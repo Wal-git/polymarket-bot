@@ -36,6 +36,12 @@ assets:
       # replay); global [7,8,15] (2026-05-16 drawdown analysis). ETH stays
       # on the global [7,8,15] list.
       skip_hours_utc: [7, 8, 14, 15, 17]
+      # 2026-06-01: lowered 0.80→0.65 after 30d backtest showed 30 marginal
+      # trades at 91-92% WR / +$48 marginal. BTC has no deep_gap, so this
+      # is the only entry floor. Going to 0.55 was +$192 but per-bucket
+      # samples were small and there was a -$96 wart at 0.70 — stopped at
+      # 0.65 for safety margin.
+      min_entry_price: 0.65
 
   ETH:
     # Polymarket lists 5-min ETH up/down markets on the same grid as BTC.
@@ -67,6 +73,11 @@ assets:
       double_min_above_usd: 10.0      # was 200 for BTC
       deep_gap_usd: 2.5               # mean delta ≥ $2.5 → use deep_gap_min_entry floor
       deep_gap_min_entry: 0.50        # allow entry down to 0.50 on high-conviction moves
+      # 2026-06-01: lowered 0.80→0.55 for normal-path (mean_abs_delta<2.5).
+      # 30d backtest: +57 marginal trades / 90% WR / +$439 vs 0.80 baseline.
+      # Deep_gap_min_entry (0.50) unchanged. This effectively unifies the
+      # two paths since deep_gap path also lands near 0.50.
+      min_entry_price: 0.55
       # 2026-06-01: lowered 5→4. 30d backtest: marginal 4-of-5 trades
       # (would fire at 4 but not 5) = 62 trades, 89% WR, +$259. Net agr=4
       # PnL +$1,983/30d vs agr=5's +$1,724.
