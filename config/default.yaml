@@ -67,7 +67,15 @@ assets:
       double_min_above_usd: 10.0      # was 200 for BTC
       deep_gap_usd: 2.5               # mean delta ≥ $2.5 → use deep_gap_min_entry floor
       deep_gap_min_entry: 0.50        # allow entry down to 0.50 on high-conviction moves
-      min_agreement: 5                # ALL 5 exchanges must agree — 88.9% accuracy vs 77.8% at 2
+      # 2026-06-01: lowered 5→4. 30d backtest: marginal 4-of-5 trades
+      # (would fire at 4 but not 5) = 62 trades, 89% WR, +$259. Net agr=4
+      # PnL +$1,983/30d vs agr=5's +$1,724.
+      min_agreement: 4
+      # 2026-06-01: hour 1 UTC added (ETH-specific). 30d data shows h01
+      # losing money at every threshold (-$77 at agr=5, -$94 at agr=4,
+      # -$119 at agr=3). Skipping h1 nets +$94/30d on top of agr=4.
+      # Global is [7,8,15]; ETH override is full replacement, not merge.
+      skip_hours_utc: [1, 7, 8, 15]
 
 strategy:
   name: btc_5min
