@@ -95,6 +95,7 @@ async def monitor_position(
                     )
                     clob.cancel_order(order_id)
                     tracker.close_position(token_id)
+                    tracker.remove_trade(token_id, slot.slug)
                     tracker.save()
                     return ExitResult(reason=ExitReason.UNFILLED, pnl=None)
             if held <= 0:
@@ -104,6 +105,7 @@ async def monitor_position(
                     token_id=token_id,
                 )
                 tracker.close_position(token_id)
+                tracker.remove_trade(token_id, slot.slug)
                 tracker.save()
                 return ExitResult(reason=ExitReason.UNFILLED, pnl=None)
 

@@ -117,6 +117,25 @@ class PositionTracker:
     def close_position(self, token_id: str) -> Position | None:
         return self._positions.pop(token_id, None)
 
+    def remove_trade(self, token_id: str, market_question: str | None = None) -> bool:
+        """Undo a phantom trade record for an order that never filled.
+
+        ``record_fill`` is called optimistically at order-placement time, so an
+        order that later times out unfilled leaves a TradeRecord behind with no
+        result — rendering as "⏳ Pending" forever on the dashboard. The unfilled
+        cleanup path calls this to drop the most recent matching BUY record.
+        Returns True if a record was removed.
+        """
+        for i in range(len(self._trades) - 1, -1, -1):
+            t = self._trades[i]
+            if t.token_id == token_id and (
+                market_question is None or t.market_question == market_question
+            ):
+                del self._trades[i]
+                self.save()
+                return True
+        return False
+
     def total_pnl(self) -> Decimal:
         realized = sum((p.realized_pnl for p in self._positions.values()), Decimal("0"))
         unrealized = sum((p.unrealized_pnl for p in self._positions.values()), Decimal("0"))
