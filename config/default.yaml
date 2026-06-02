@@ -149,6 +149,13 @@ strategy:
     # Positions now ride to resolution unless bid collapses past stop_loss.
     stop_loss: 0.35                 # sell when shares drop to 35c
     hold_to_resolution_s_remaining: 60   # if less than 60s left, hold to resolution
+    # Time-gate the stop-loss: only honor it within this many seconds of entry.
+    # Backtest over 20 stops (2026-05-14..06-02): fast crashes (bid hits stop
+    # <=60s after entry) are real losers worth cutting (+$164 net); slower bleeds
+    # to the stop later in the slot mostly revert before resolution and cost
+    # money when sold (-$173 net). Set <=0 to disable the gate. See backtest in
+    # scripts/backtest_stop_window.py.
+    stop_window_s: 60
 
   sizing:
     mode: kelly
