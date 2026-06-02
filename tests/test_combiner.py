@@ -405,15 +405,16 @@ class TestShouldTrade:
         from polybot.signals import calibration as calibration_mod
         monkeypatch.setattr(event_log, "_DEFAULT_EVALS", tmp_path / "evals.jsonl")
 
-        # Build a mini table that returns 0.83 for 100-150 delta bucket
+        # Build a mini table that returns 0.83 for the 0.50-0.60 entry bucket
+        # (mock best_ask is 0.52). Confidence is now entry-keyed, not delta-keyed.
         table_path = tmp_path / "table.json"
         table_path.write_text(json.dumps({
-            "version": 1,
+            "version": 2,
             "global": {"trials": 45, "wins": 34},
             "buckets": {
-                "delta_x_entry_x_hour": {},
-                "delta_x_entry": {},
-                "delta": {"100-150": {"trials": 16, "wins": 14}},
+                "asset_x_entry": {},
+                "entry": {"0.50-0.60": {"trials": 16, "wins": 14}},
+                "asset": {},
             },
         }))
         calibration_mod.reset_cache()
@@ -434,15 +435,16 @@ class TestShouldTrade:
             "sizing": {"kelly_fraction": 0.25, "min_trade_usdc": 10, "max_trade_usdc": 200},
         }
 
-        prices = _prices(95_120, 95_110)  # both ≥100 → max_abs_delta = 120 → "100-150"
+        prices = _prices(95_120, 95_110)  # both ≥100 → fires UP; entry (best_ask)=0.52
         ws = _mock_book_ws(imbalance_ratio=2.0, secs=60.0)
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=cfg)
         assert isinstance(result, TradeSignal)
-        # Smoothed (14+1)/(16+2) = 15/18 ≈ 0.833 — formula would give 0.6 + 115/250 = 1.06 → cap 0.95
+        # Smoothed (14+1)/(16+2) = 15/18 ≈ 0.833 — the retired formula would give
+        # 0.6 + 115/250 = 1.06 → cap 0.95; entry-empirical lookup gives 0.833.
         assert result.confidence == pytest.approx(15 / 18, abs=0.005)
 
         evals = [json.loads(l) for l in (tmp_path / "evals.jsonl").read_text().splitlines()]
-        assert evals[-1]["confidence_source"] == "calibration:delta"
+        assert evals[-1]["confidence_source"] == "calibration:entry"
 
     def test_calibration_disabled_uses_formula(self, tmp_path, monkeypatch):
         import json

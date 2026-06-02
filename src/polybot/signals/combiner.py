@@ -358,16 +358,19 @@ def should_trade(
         )
         return None
 
-    # Confidence — calibrated lookup if enabled and table available, else formula.
-    # Formula uses percentage delta (mean_abs_delta / price_to_beat) so it is
-    # asset-agnostic: a 0.2% move on BTC and a 0.2% move on ETH both yield the
-    # same confidence score, regardless of their dollar sizes.
-    # Scaling constant 0.004 (0.4% ≈ full confidence above the 0.60 base):
-    #   BTC $150 delta @ $75k  (0.20%) → 0.95  (capped)
-    #   ETH $2.0 delta @ $2.25k (0.089%) → 0.82  (passes 0.80 gate)
-    #   ETH $1.5 delta @ $2.25k (0.067%) → 0.77  (blocked — matches 77.8% empirical)
+    # Confidence — empirical resolution win rate for the (asset, entry-price)
+    # bucket when calibration is enabled, else the legacy delta formula.
+    #
+    # The delta formula (0.6 + pct_delta/0.004, capped) was retired 2026-06-02:
+    # a 226-trade analysis showed it saturated (74% of trades pinned at 0.95),
+    # overstated the true rate by ~5pts, and — worst — was *inverted*: the
+    # largest moves (>0.30%) had the LOWEST resolution win rate (83%) yet got
+    # max confidence (mean reversion). Entry price predicts the win rate cleanly
+    # and is the correct p for Kelly (edge = p - entry_price). It is kept only as
+    # the fallback for when no calibration table is available yet.
     _pct_delta = mean_abs_delta / slot.price_to_beat if slot.price_to_beat else 0.0
     cal_cfg = sig_cfg.get("calibration", {})
+    cap = float(cal_cfg.get("cap", 0.95))
     confidence_source = "formula"
     if cal_cfg.get("enabled", False):
         table_path = (
@@ -379,21 +382,20 @@ def should_trade(
         if table is not None:
             cal_min_n = int(cal_cfg.get("min_n", 5))
             cal_fallback = float(cal_cfg.get("fallback_confidence", 0.75))
-            rate, source = calibration_mod.lookup_win_rate(
+            rate, source = calibration_mod.lookup_entry_win_rate(
                 table,
-                max_abs_delta=max_abs_delta,
+                asset=asset.name if asset is not None else None,
                 entry_price=entry_price,
-                hour_utc=int(time.gmtime().tm_hour),
                 min_n=cal_min_n,
                 fallback=cal_fallback,
             )
-            confidence = min(0.95, rate)
+            confidence = min(cap, rate)
             confidence_source = f"calibration:{source}"
         else:
-            confidence = min(0.95, 0.6 + _pct_delta / 0.004)
+            confidence = min(cap, 0.6 + _pct_delta / 0.004)
             confidence_source = "formula:no_table"
     else:
-        confidence = min(0.95, 0.6 + _pct_delta / 0.004)
+        confidence = min(cap, 0.6 + _pct_delta / 0.004)
 
     min_confidence = _override("min_confidence", float(siz_cfg.get("min_confidence", 0.0)))
     if confidence < min_confidence:

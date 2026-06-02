@@ -85,6 +85,45 @@ def lookup_win_rate(
     return fallback, "fallback"
 
 
+def lookup_entry_win_rate(
+    table: dict,
+    asset: Optional[str],
+    entry_price: float,
+    min_n: int = 5,
+    fallback: float = 0.5,
+) -> tuple[float, str]:
+    """Return ``(rate, source)`` keyed on the entry price (and asset).
+
+    Empirical analysis (2026-06-02) showed the divergence magnitude does not
+    rank-order outcomes — if anything the largest moves win *less* (mean
+    reversion) — while the order-book entry price predicts the resolution win
+    rate cleanly and monotonically. So confidence is now the historical
+    resolution win rate for the trade's (asset, entry) bucket, which also makes
+    it the correct ``p`` for Kelly (edge = p - entry_price).
+
+    Tries the most-specific bucket first, falling back when a cell has fewer
+    than ``min_n`` trials:  asset × entry  →  entry  →  asset  →  global.
+    """
+    eb = bucket_entry(entry_price)
+    groups = table.get("buckets", {})
+    levels = (
+        ("asset_x_entry", f"{asset}_{eb}"),
+        ("entry", eb),
+        ("asset", str(asset)),
+    )
+    for level_name, key in levels:
+        cell = groups.get(level_name, {}).get(key)
+        if cell and cell.get("trials", 0) >= min_n:
+            return smoothed_rate(cell["wins"], cell["trials"]), level_name
+
+    if "global" in table:
+        g = table["global"]
+        if g.get("trials", 0) >= 1:
+            return smoothed_rate(g["wins"], g["trials"]), "global"
+
+    return fallback, "fallback"
+
+
 # Module-level cache so we don't re-read the file every signal evaluation
 _table_cache: tuple[Path, dict] | None = None
 
