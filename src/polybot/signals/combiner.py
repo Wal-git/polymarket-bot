@@ -17,7 +17,6 @@ from polybot.models.market import (
 from polybot.monitoring.event_log import emit_evaluation
 from polybot.signals import calibration as calibration_mod
 from polybot.signals.divergence import detect_divergence
-from polybot.signals.imbalance import calculate_imbalance, detect_smart_entry
 
 logger = structlog.get_logger()
 
@@ -40,12 +39,10 @@ def should_trade(
     direction past min_gap), OR when any single exchange exceeds ``fast_pass_usd``
     and all available exchanges agree on direction.
 
-    Imbalance, Chainlink, and Futures data are captured for diagnostics but not
-    used as gates.
+    Chainlink and Futures data are captured for diagnostics but not used as gates.
     """
     sig_cfg = config.get("signals", {})
     div_cfg = sig_cfg.get("divergence", {})
-    imb_cfg = sig_cfg.get("imbalance", {})
     siz_cfg = config.get("sizing", {})
     entry_cfg = config.get("entry", {})
 
@@ -68,12 +65,6 @@ def should_trade(
         if (asset_thresholds is not None and asset_thresholds.min_agreement is not None)
         else div_cfg.get("min_agreement", 2)
     )
-    threshold_buy = float(imb_cfg.get("buy_threshold", 1.8))
-    threshold_sell = float(imb_cfg.get("sell_threshold", 0.55))
-    window_cfg = imb_cfg.get("detection_window_seconds", [30, 90])
-    window = (float(window_cfg[0]), float(window_cfg[1]))
-    depth = int(imb_cfg.get("depth_levels", 10))
-
     # Per-exchange deltas (only for available exchanges)
     available = prices.exchange_prices()
     deltas: dict[str, float] = {
@@ -105,19 +96,6 @@ def should_trade(
         up_best_ask=round(up_best_ask, 4) if up_best_ask is not None else None,
         down_best_ask=round(down_best_ask, 4) if down_best_ask is not None else None,
         **_per_exchange_diag,
-    )
-
-    # Always capture orderbook state for diagnostics
-    history = book_ws.get_imbalance_history()
-    window_readings = [r for r in history if window[0] <= r.seconds_since_open <= window[1]]
-    window_ratio = round(max((r.ratio for r in window_readings), default=0.0), 3) if window_readings else None
-    latest_ratio = round(history[-1].ratio, 3) if history else None
-
-    _imb_diag = dict(
-        imbalance_ratio=window_ratio,
-        latest_imbalance_ratio=latest_ratio,
-        imbalance_readings=len(history),
-        window_readings=len(window_readings),
     )
 
     # Chainlink diagnostics — logged into every evaluation, never used as a gate.
@@ -197,8 +175,6 @@ def should_trade(
         fast_pass_usd=fast_pass,
         fast_pass_enabled=fast_pass_enabled,
         min_agreement=min_agreement,
-        buy_threshold=threshold_buy,
-        sell_threshold=threshold_sell,
         bankroll=round(bankroll, 2),
         deep_gap_usd=deep_gap_usd,
         deep_gap_min_entry=deep_gap_min_entry,
@@ -206,7 +182,7 @@ def should_trade(
 
     def _emit(**extra) -> None:
         emit_evaluation(
-            **_base, **_imb_diag, **_thresholds, **_chainlink_diag, **_futures_diag,
+            **_base, **_thresholds, **_chainlink_diag, **_futures_diag,
             **_macro_diag, **extra
         )
 
@@ -220,7 +196,7 @@ def should_trade(
         current_hour_utc = time.gmtime().tm_hour
         if current_hour_utc in skip_hours:
             _emit(
-                div_direction=None, imb_direction=None, confluence=False, fast_pass=False,
+                div_direction=None, confluence=False, fast_pass=False,
                 confidence=None, size_usdc=None, direction=None,
                 reject_reason="hour_filter",
             )
@@ -230,7 +206,7 @@ def should_trade(
     if not deltas:
         logger.warning("no_exchange_prices", slug=slot.slug)
         _emit(
-            div_direction=None, imb_direction=None, confluence=False, fast_pass=False,
+            div_direction=None, confluence=False, fast_pass=False,
             confidence=None, size_usdc=None, direction=None,
             reject_reason="no_exchange_prices",
         )
@@ -245,7 +221,7 @@ def should_trade(
         logger.debug("divergence_too_large", slug=slot.slug,
                      deltas=deltas, max_gap=max_gap)
         _emit(
-            div_direction=None, imb_direction=None, confluence=False, fast_pass=False,
+            div_direction=None, confluence=False, fast_pass=False,
             confidence=None, size_usdc=None, direction=None,
             reject_reason="divergence_too_large",
         )
@@ -279,7 +255,7 @@ def should_trade(
     if direction is None:
         logger.debug("no_divergence", slug=slot.slug, up_votes=up_votes, down_votes=down_votes)
         _emit(
-            div_direction=None, imb_direction=None, confluence=False, fast_pass=False,
+            div_direction=None, confluence=False, fast_pass=False,
             confidence=None, size_usdc=None, direction=None,
             reject_reason="no_divergence",
         )
@@ -296,17 +272,13 @@ def should_trade(
                          lag_s=round(cl_lag_now, 1), max_lag=max_cl_lag)
             _emit(
                 div_direction=direction.value,
-                imb_direction=None, confluence=False, fast_pass=fast_pass_triggered,
+                confluence=False, fast_pass=fast_pass_triggered,
                 confidence=None, size_usdc=None, direction=None,
                 reject_reason="chainlink_stale",
             )
             return None
 
-    # Capture imbalance snapshot for diagnostics (not a gate)
-    imb_direction = detect_smart_entry(history, threshold_buy, threshold_sell, window)
     token_id = slot.up_token_id if direction == Direction.UP else slot.down_token_id
-    snapshot = book_ws.get_snapshot(token_id)
-    imbalance = calculate_imbalance(snapshot, depth=depth)
     entry_price = book_ws.best_ask(direction) or 0.5
 
     # mean_abs_delta is needed for both the deep-gap entry-price check and
@@ -332,8 +304,6 @@ def should_trade(
                      deep_gap_triggered=deep_gap_triggered)
         _emit(
             div_direction=direction.value,
-            imb_direction=imb_direction.value if imb_direction else None,
-            snapshot_imbalance=round(imbalance, 3),
             confluence=False, fast_pass=fast_pass_triggered,
             confidence=None, size_usdc=None, direction=None,
             best_ask=round(entry_price, 4),
@@ -347,8 +317,6 @@ def should_trade(
                      entry_price=round(entry_price, 4), ceiling=max_entry_price)
         _emit(
             div_direction=direction.value,
-            imb_direction=imb_direction.value if imb_direction else None,
-            snapshot_imbalance=round(imbalance, 3),
             confluence=False, fast_pass=fast_pass_triggered,
             confidence=None, size_usdc=None, direction=None,
             best_ask=round(entry_price, 4),
@@ -403,8 +371,6 @@ def should_trade(
                      confidence=round(confidence, 3), min_confidence=min_confidence)
         _emit(
             div_direction=direction.value,
-            imb_direction=imb_direction.value if imb_direction else None,
-            snapshot_imbalance=round(imbalance, 3),
             confluence=False, fast_pass=fast_pass_triggered,
             confidence=round(confidence, 3),
             confidence_source=confidence_source,
@@ -458,8 +424,6 @@ def should_trade(
 
     _emit(
         div_direction=direction.value,
-        imb_direction=imb_direction.value if imb_direction else None,
-        snapshot_imbalance=round(imbalance, 3),
         confluence=True, fast_pass=fast_pass_triggered,
         doubled_min=large_move,
         confidence=round(confidence, 3),

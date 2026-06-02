@@ -39,17 +39,12 @@ def _render_eval_card(ev: dict, result: dict | None = None) -> None:
     asset = ev.get("asset", "BTC")
     ptb = ev.get("price_to_beat") or 0
     div_dir = ev.get("div_direction")
-    imb_dir = ev.get("imb_direction")
-    imb_ratio = ev.get("imbalance_ratio")
     confidence = ev.get("confidence")
     size_usdc = ev.get("size_usdc")
     direction = ev.get("direction")
 
     div_icon = "✓" if div_dir else "✗"
     div_color = "#0ECB81" if div_dir else "#F6465D"
-    imb_icon = "✓" if imb_dir else "✗"
-    imb_color = "#0ECB81" if imb_dir else "#F6465D"
-    ratio_str = f"{imb_ratio:.3f}" if imb_ratio is not None else "n/a"
 
     exchange_tiles = render_exchange_tiles(ev)
 
@@ -80,7 +75,6 @@ def _render_eval_card(ev: dict, result: dict | None = None) -> None:
         </div>
         <div style="display:flex;gap:1.25rem;font-family:'Inter',sans-serif;font-size:0.78rem;">
             <span style="color:{div_color};">{div_icon} Divergence: <strong>{div_dir or 'none'}</strong></span>
-            <span style="color:{imb_color};">{imb_icon} Imbalance: <strong>{ratio_str}</strong> → {imb_dir or 'none'}</span>
         </div>
     </div>
     """, unsafe_allow_html=True)

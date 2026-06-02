@@ -43,12 +43,6 @@ def _make_lifecycle(slot: SlotInfo, dry_run: bool = True) -> MarketLifecycle:
             "exit": {"profit_target": 0.75, "stop_loss": 0.35, "hold_to_resolution_s_remaining": 60},
             "signals": {
                 "divergence": {"min_gap_usd": 50.0},
-                "imbalance": {
-                    "buy_threshold": 1.8,
-                    "sell_threshold": 0.55,
-                    "detection_window_seconds": [30, 90],
-                    "depth_levels": 10,
-                },
             },
             "sizing": {"kelly_fraction": 0.25, "min_trade_usdc": 10, "max_trade_usdc": 200},
         }

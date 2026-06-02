@@ -8,10 +8,7 @@ from polybot.models.btc_market import (
     ChainlinkRound,
     Direction,
     FuturesSnapshot,
-    ImbalanceReading,
     MacroSnapshot,
-    OrderBookSnapshot,
-    OrderLevel,
     SlotInfo,
     TradeSignal,
 )
@@ -35,17 +32,8 @@ def _prices(binance: float, coinbase: float) -> BtcPrices:
     return BtcPrices(binance=binance, coinbase=coinbase, chainlink=None, ts=time.time())
 
 
-def _mock_book_ws(best_ask: float = 0.52, imbalance_ratio: float = 2.0, secs: float = 60.0):
+def _mock_book_ws(best_ask: float = 0.52):
     ws = MagicMock()
-    ws.get_imbalance_history.return_value = [
-        ImbalanceReading(ratio=imbalance_ratio, seconds_since_open=secs, ts=time.time())
-    ]
-    snapshot = OrderBookSnapshot(
-        asset_id="up",
-        bids=[OrderLevel(price=0.50, size=200)],
-        asks=[OrderLevel(price=best_ask, size=100)],
-    )
-    ws.get_snapshot.return_value = snapshot
     ws.best_ask.return_value = best_ask
     return ws
 
@@ -53,12 +41,6 @@ def _mock_book_ws(best_ask: float = 0.52, imbalance_ratio: float = 2.0, secs: fl
 _DEFAULT_CONFIG = {
     "signals": {
         "divergence": {"min_gap_usd": 100.0, "max_gap_usd": 200.0, "fast_pass_usd": 125.0},
-        "imbalance": {
-            "buy_threshold": 1.8,
-            "sell_threshold": 0.55,
-            "detection_window_seconds": [30, 90],
-            "depth_levels": 10,
-        },
     },
     "sizing": {"kelly_fraction": 0.25, "min_trade_usdc": 10, "max_trade_usdc": 200},
 }
@@ -67,7 +49,7 @@ _DEFAULT_CONFIG = {
 class TestShouldTrade:
     def test_divergence_fires_signal(self):
         prices = _prices(95_120, 95_110)  # both > $100 gap, under $200 max
-        ws = _mock_book_ws(imbalance_ratio=2.0, secs=60.0)
+        ws = _mock_book_ws()
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=_DEFAULT_CONFIG)
         assert isinstance(result, TradeSignal)
         assert result.direction == Direction.UP
@@ -76,35 +58,20 @@ class TestShouldTrade:
 
     def test_no_divergence_returns_none(self):
         prices = _prices(95_020, 95_010)  # only $20 gap, below $100 threshold
-        ws = _mock_book_ws(imbalance_ratio=2.0, secs=60.0)
+        ws = _mock_book_ws()
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=_DEFAULT_CONFIG)
         assert result is None
 
     def test_below_min_gap_returns_none(self):
         # Both exchanges past old 75 threshold but under new 100 — must reject
         prices = _prices(95_080, 95_080)
-        ws = _mock_book_ws(imbalance_ratio=2.0, secs=60.0)
+        ws = _mock_book_ws()
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=_DEFAULT_CONFIG)
         assert result is None
 
-    def test_divergence_fires_regardless_of_imbalance(self):
-        # Imbalance is no longer a gate — low imbalance should still fire
-        prices = _prices(95_120, 95_110)
-        ws = _mock_book_ws(imbalance_ratio=1.2, secs=60.0)
-        result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=_DEFAULT_CONFIG)
-        assert isinstance(result, TradeSignal)
-        assert result.direction == Direction.UP
-
-    def test_divergence_fires_regardless_of_imbalance_window(self):
-        # Imbalance window timing no longer blocks the trade
-        prices = _prices(95_120, 95_110)
-        ws = _mock_book_ws(imbalance_ratio=2.5, secs=15.0)  # outside 30-90s window
-        result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=_DEFAULT_CONFIG)
-        assert isinstance(result, TradeSignal)
-
     def test_down_direction(self):
         prices = _prices(94_880, 94_890)  # both below price_to_beat by >$100, under $200 max
-        ws = _mock_book_ws(imbalance_ratio=0.4, secs=60.0, best_ask=0.52)
+        ws = _mock_book_ws(best_ask=0.52)
         ws.best_ask.return_value = 0.52
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=_DEFAULT_CONFIG)
         assert result is not None
@@ -113,7 +80,7 @@ class TestShouldTrade:
     def test_fast_pass_one_exchange_large(self):
         # Only Binance > $125 fast-pass; Coinbase under min_gap but same direction
         prices = _prices(95_180, 95_030)  # binance +180, coinbase +30
-        ws = _mock_book_ws(imbalance_ratio=1.0, secs=60.0)
+        ws = _mock_book_ws()
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=_DEFAULT_CONFIG)
         assert isinstance(result, TradeSignal)
         assert result.direction == Direction.UP
@@ -125,14 +92,12 @@ class TestShouldTrade:
                 "divergence": {"min_gap_usd": 100.0, "max_gap_usd": 200.0,
                                "fast_pass_usd": 125.0, "fast_pass_enabled": False,
                                "min_agreement": 2},
-                "imbalance": {"buy_threshold": 1.8, "sell_threshold": 0.55,
-                              "detection_window_seconds": [30, 90], "depth_levels": 10},
             },
             "sizing": {"kelly_fraction": 0.25, "min_trade_usdc": 10, "max_trade_usdc": 200},
         }
         # binance +180 (over fast_pass), coinbase +20 (only 1 vote past min_gap=100)
         prices = _prices(95_180, 95_020)
-        ws = _mock_book_ws(imbalance_ratio=1.0, secs=60.0)
+        ws = _mock_book_ws()
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=cfg)
         assert result is None  # Would have fired with fast_pass on; should not now
 
@@ -143,13 +108,11 @@ class TestShouldTrade:
                 "divergence": {"min_gap_usd": 100.0, "max_gap_usd": 200.0,
                                "fast_pass_usd": 125.0, "fast_pass_enabled": False,
                                "min_agreement": 2},
-                "imbalance": {"buy_threshold": 1.8, "sell_threshold": 0.55,
-                              "detection_window_seconds": [30, 90], "depth_levels": 10},
             },
             "sizing": {"kelly_fraction": 0.25, "min_trade_usdc": 10, "max_trade_usdc": 200},
         }
         prices = _prices(95_120, 95_110)  # both past min_gap=100
-        ws = _mock_book_ws(imbalance_ratio=1.0, secs=60.0)
+        ws = _mock_book_ws()
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=cfg)
         assert isinstance(result, TradeSignal)
         assert result.direction == Direction.UP
@@ -158,7 +121,7 @@ class TestShouldTrade:
         # Binance +180 (past fast_pass), coinbase -20 (small noise, under min_gap).
         # Under N-of-M, dissent only counts past min_gap. -$20 is noise → fires.
         prices = _prices(95_180, 94_980)
-        ws = _mock_book_ws(imbalance_ratio=1.0, secs=60.0)
+        ws = _mock_book_ws()
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=_DEFAULT_CONFIG)
         assert isinstance(result, TradeSignal)
         assert result.direction == Direction.UP
@@ -166,27 +129,27 @@ class TestShouldTrade:
     def test_fast_pass_blocked_when_real_dissent(self):
         # Binance +180 (fast_pass), coinbase -150 (real dissent past min_gap=100) — block
         prices = _prices(95_180, 94_850)
-        ws = _mock_book_ws(imbalance_ratio=1.0, secs=60.0)
+        ws = _mock_book_ws()
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=_DEFAULT_CONFIG)
         assert result is None
 
     def test_max_gap_rejects_over_extended_up(self):
         # Both exchanges past max_gap_usd — over-extended, must reject
         prices = _prices(95_250, 95_240)  # both +240 > 200 max
-        ws = _mock_book_ws(imbalance_ratio=2.0, secs=60.0)
+        ws = _mock_book_ws()
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=_DEFAULT_CONFIG)
         assert result is None
 
     def test_max_gap_rejects_over_extended_down(self):
         prices = _prices(94_750, 94_760)  # both -240/-250 < -200 max
-        ws = _mock_book_ws(imbalance_ratio=0.4, secs=60.0, best_ask=0.52)
+        ws = _mock_book_ws(best_ask=0.52)
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=_DEFAULT_CONFIG)
         assert result is None
 
     def test_max_gap_rejects_when_only_one_exchange_extreme(self):
         # Binance +250 (over max_gap), Coinbase +150 — still rejects
         prices = _prices(95_250, 95_150)
-        ws = _mock_book_ws(imbalance_ratio=2.0, secs=60.0)
+        ws = _mock_book_ws()
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=_DEFAULT_CONFIG)
         assert result is None
 
@@ -195,17 +158,11 @@ class TestShouldTrade:
         cfg = {
             "signals": {
                 "divergence": {"min_gap_usd": 100.0, "max_gap_usd": 0.0, "fast_pass_usd": 125.0},
-                "imbalance": {
-                    "buy_threshold": 1.8,
-                    "sell_threshold": 0.55,
-                    "detection_window_seconds": [30, 90],
-                    "depth_levels": 10,
-                },
             },
             "sizing": {"kelly_fraction": 0.25, "min_trade_usdc": 10, "max_trade_usdc": 200},
         }
         prices = _prices(95_400, 95_400)  # both +400, far over default max
-        ws = _mock_book_ws(imbalance_ratio=2.0, secs=60.0)
+        ws = _mock_book_ws()
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=cfg)
         assert isinstance(result, TradeSignal)
 
@@ -216,13 +173,11 @@ class TestShouldTrade:
         prices = BtcPrices(
             binance=95_120, coinbase=95_110, kraken=95_115, bitstamp=95_005, okx=95_010,
         )
-        ws = _mock_book_ws(imbalance_ratio=2.0, secs=60.0)
+        ws = _mock_book_ws()
         cfg = {
             "signals": {
                 "divergence": {"min_gap_usd": 100.0, "max_gap_usd": 0.0,
                                "fast_pass_usd": 1000.0, "min_agreement": 3},
-                "imbalance": {"buy_threshold": 1.8, "sell_threshold": 0.55,
-                              "detection_window_seconds": [30, 90], "depth_levels": 10},
             },
             "sizing": {"kelly_fraction": 0.25, "min_trade_usdc": 10, "max_trade_usdc": 200},
         }
@@ -236,13 +191,11 @@ class TestShouldTrade:
         prices = BtcPrices(
             binance=95_120, coinbase=95_110, kraken=95_005, bitstamp=95_000, okx=95_005,
         )
-        ws = _mock_book_ws(imbalance_ratio=2.0, secs=60.0)
+        ws = _mock_book_ws()
         cfg = {
             "signals": {
                 "divergence": {"min_gap_usd": 100.0, "max_gap_usd": 0.0,
                                "fast_pass_usd": 1000.0, "min_agreement": 3},
-                "imbalance": {"buy_threshold": 1.8, "sell_threshold": 0.55,
-                              "detection_window_seconds": [30, 90], "depth_levels": 10},
             },
             "sizing": {"kelly_fraction": 0.25, "min_trade_usdc": 10, "max_trade_usdc": 200},
         }
@@ -257,13 +210,11 @@ class TestShouldTrade:
             binance=95_120, coinbase=95_110, kraken=95_115,
             bitstamp=None, okx=None,
         )
-        ws = _mock_book_ws(imbalance_ratio=2.0, secs=60.0)
+        ws = _mock_book_ws()
         cfg = {
             "signals": {
                 "divergence": {"min_gap_usd": 100.0, "max_gap_usd": 0.0,
                                "fast_pass_usd": 1000.0, "min_agreement": 3},
-                "imbalance": {"buy_threshold": 1.8, "sell_threshold": 0.55,
-                              "detection_window_seconds": [30, 90], "depth_levels": 10},
             },
             "sizing": {"kelly_fraction": 0.25, "min_trade_usdc": 10, "max_trade_usdc": 200},
         }
@@ -277,7 +228,7 @@ class TestShouldTrade:
         monkeypatch.setattr(event_log, "_DEFAULT_EVALS", tmp_path / "evaluations.jsonl")
 
         prices = _prices(95_120, 95_110)
-        ws = _mock_book_ws(imbalance_ratio=2.0, secs=60.0)
+        ws = _mock_book_ws()
         cl = ChainlinkRound(answer=95_000.0, updated_at=int(time.time()) - 45, round_id=42)
         result = should_trade(
             prices, ws, _slot(95_000),
@@ -298,7 +249,7 @@ class TestShouldTrade:
         monkeypatch.setattr(event_log, "_DEFAULT_EVALS", tmp_path / "evals.jsonl")
 
         prices = _prices(95_120, 95_110)
-        ws = _mock_book_ws(imbalance_ratio=2.0, secs=60.0)
+        ws = _mock_book_ws()
         m = MacroSnapshot(vix=18.5, dxy=104.2, es_price=5800.0, es_pct_change_1h=0.0035, ts=time.time())
         result = should_trade(
             prices, ws, _slot(95_000),
@@ -320,7 +271,7 @@ class TestShouldTrade:
         monkeypatch.setattr(event_log, "_DEFAULT_EVALS", tmp_path / "evals.jsonl")
 
         prices = _prices(95_020, 95_010)  # below min_gap → no_divergence
-        ws = _mock_book_ws(imbalance_ratio=2.0, secs=60.0)
+        ws = _mock_book_ws()
         m = MacroSnapshot(vix=18.5, dxy=None, es_price=None, es_pct_change_1h=None, ts=time.time())
         result = should_trade(
             prices, ws, _slot(95_000),
@@ -340,7 +291,7 @@ class TestShouldTrade:
         monkeypatch.setattr(event_log, "_DEFAULT_EVALS", tmp_path / "evals.jsonl")
 
         prices = _prices(95_120, 95_110)
-        ws = _mock_book_ws(imbalance_ratio=2.0, secs=60.0)
+        ws = _mock_book_ws()
         fut = FuturesSnapshot(
             mark_price=95_115.0,
             index_price=95_113.5,
@@ -370,7 +321,7 @@ class TestShouldTrade:
         monkeypatch.setattr(event_log, "_DEFAULT_EVALS", tmp_path / "evals.jsonl")
 
         prices = _prices(95_020, 95_010)
-        ws = _mock_book_ws(imbalance_ratio=2.0, secs=60.0)
+        ws = _mock_book_ws()
         result = should_trade(
             prices, ws, _slot(95_000),
             bankroll=2000.0, config=_DEFAULT_CONFIG, futures=None,
@@ -388,7 +339,7 @@ class TestShouldTrade:
         monkeypatch.setattr(event_log, "_DEFAULT_EVALS", tmp_path / "evaluations.jsonl")
 
         prices = _prices(95_020, 95_010)  # below min_gap → no_divergence reject
-        ws = _mock_book_ws(imbalance_ratio=2.0, secs=60.0)
+        ws = _mock_book_ws()
         result = should_trade(
             prices, ws, _slot(95_000),
             bankroll=2000.0, config=_DEFAULT_CONFIG, chainlink=None,
@@ -423,8 +374,6 @@ class TestShouldTrade:
             "signals": {
                 "divergence": {"min_gap_usd": 100.0, "max_gap_usd": 0.0,
                                "fast_pass_usd": 1000.0, "min_agreement": 2},
-                "imbalance": {"buy_threshold": 1.8, "sell_threshold": 0.55,
-                              "detection_window_seconds": [30, 90], "depth_levels": 10},
                 "calibration": {
                     "enabled": True,
                     "table_path": str(table_path),
@@ -436,7 +385,7 @@ class TestShouldTrade:
         }
 
         prices = _prices(95_120, 95_110)  # both ≥100 → fires UP; entry (best_ask)=0.52
-        ws = _mock_book_ws(imbalance_ratio=2.0, secs=60.0)
+        ws = _mock_book_ws()
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=cfg)
         assert isinstance(result, TradeSignal)
         # Smoothed (14+1)/(16+2) = 15/18 ≈ 0.833 — the retired formula would give
@@ -452,7 +401,7 @@ class TestShouldTrade:
         monkeypatch.setattr(event_log, "_DEFAULT_EVALS", tmp_path / "evals.jsonl")
 
         prices = _prices(95_120, 95_110)
-        ws = _mock_book_ws(imbalance_ratio=2.0, secs=60.0)
+        ws = _mock_book_ws()
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=_DEFAULT_CONFIG)
         assert isinstance(result, TradeSignal)
 
@@ -470,8 +419,6 @@ class TestShouldTrade:
             "signals": {
                 "divergence": {"min_gap_usd": 100.0, "max_gap_usd": 0.0,
                                "fast_pass_usd": 1000.0, "min_agreement": 2},
-                "imbalance": {"buy_threshold": 1.8, "sell_threshold": 0.55,
-                              "detection_window_seconds": [30, 90], "depth_levels": 10},
                 "calibration": {
                     "enabled": True,
                     "table_path": str(tmp_path / "missing.json"),
@@ -481,7 +428,7 @@ class TestShouldTrade:
         }
 
         prices = _prices(95_120, 95_110)
-        ws = _mock_book_ws(imbalance_ratio=2.0, secs=60.0)
+        ws = _mock_book_ws()
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=cfg)
         assert isinstance(result, TradeSignal)
 
@@ -493,17 +440,11 @@ class TestShouldTrade:
         cfg = {
             "signals": {
                 "divergence": {"min_gap_usd": 100.0, "max_gap_usd": 0.0, "fast_pass_usd": 125.0},
-                "imbalance": {
-                    "buy_threshold": 1.8,
-                    "sell_threshold": 0.55,
-                    "detection_window_seconds": [30, 90],
-                    "depth_levels": 10,
-                },
             },
             "sizing": {"kelly_fraction": 0.25, "min_trade_usdc": 10, "max_trade_usdc": 200},
         }
         prices = _prices(200_000, 200_000)  # huge delta
-        ws = _mock_book_ws(imbalance_ratio=10.0, secs=60.0)
+        ws = _mock_book_ws()
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=cfg)
         if result:
             assert result.confidence <= 0.95
@@ -514,10 +455,6 @@ class TestEntryPriceGate:
         return {
             "signals": {
                 "divergence": {"min_gap_usd": 100.0, "max_gap_usd": 0.0, "fast_pass_usd": 125.0},
-                "imbalance": {
-                    "buy_threshold": 1.8, "sell_threshold": 0.55,
-                    "detection_window_seconds": [30, 90], "depth_levels": 10,
-                },
             },
             "sizing": {
                 "kelly_fraction": 0.25, "min_trade_usdc": 10, "max_trade_usdc": 200,
@@ -530,7 +467,7 @@ class TestEntryPriceGate:
         # Divergence fires (both exchanges +120 over PTB), but best_ask=0.55 — book hasn't
         # repriced enough to clear the entry-price floor. Must reject.
         prices = _prices(95_120, 95_110)
-        ws = _mock_book_ws(best_ask=0.55, imbalance_ratio=2.0, secs=60.0)
+        ws = _mock_book_ws(best_ask=0.55)
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0,
                               config=self._cfg(min_entry_price=0.80))
         assert result is None
@@ -538,7 +475,7 @@ class TestEntryPriceGate:
     def test_min_entry_price_allows_high_orderbook_consensus(self):
         # Same divergence but best_ask=0.85 — book confirms, signal fires.
         prices = _prices(95_120, 95_110)
-        ws = _mock_book_ws(best_ask=0.85, imbalance_ratio=2.0, secs=60.0)
+        ws = _mock_book_ws(best_ask=0.85)
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0,
                               config=self._cfg(min_entry_price=0.80))
         assert isinstance(result, TradeSignal)
@@ -547,7 +484,7 @@ class TestEntryPriceGate:
     def test_max_entry_price_blocks_near_certainty(self):
         # best_ask=0.97 — payoff (1-p)/p ≈ 0.031, too small to recoup occasional losses.
         prices = _prices(95_120, 95_110)
-        ws = _mock_book_ws(best_ask=0.97, imbalance_ratio=2.0, secs=60.0)
+        ws = _mock_book_ws(best_ask=0.97)
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0,
                               config=self._cfg(min_entry_price=0.80, max_entry_price=0.95))
         assert result is None
@@ -555,7 +492,7 @@ class TestEntryPriceGate:
     def test_gates_disabled_when_zero(self):
         # min_entry_price=0 (default) leaves the existing behavior untouched.
         prices = _prices(95_120, 95_110)
-        ws = _mock_book_ws(best_ask=0.52, imbalance_ratio=2.0, secs=60.0)
+        ws = _mock_book_ws(best_ask=0.52)
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=self._cfg())
         assert isinstance(result, TradeSignal)
 
@@ -566,7 +503,7 @@ class TestEntryPriceGate:
         monkeypatch.setattr(el, "_DEFAULT_EVALS", tmp_path / "evals.jsonl")
 
         prices = _prices(95_120, 95_110)
-        ws = _mock_book_ws(best_ask=0.60, imbalance_ratio=2.0, secs=60.0)
+        ws = _mock_book_ws(best_ask=0.60)
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0,
                               config=self._cfg(min_entry_price=0.80))
         assert result is None
@@ -584,7 +521,7 @@ class TestEntryPriceGate:
         monkeypatch.setattr(el, "_DEFAULT_EVALS", tmp_path / "evals.jsonl")
 
         prices = _prices(95_010, 95_020)  # only $10/$20, well below min_gap
-        ws = _mock_book_ws(best_ask=0.51, imbalance_ratio=1.0, secs=60.0)
+        ws = _mock_book_ws(best_ask=0.51)
         result = should_trade(prices, ws, _slot(95_000), bankroll=2000.0, config=self._cfg())
         assert result is None
 
@@ -599,8 +536,6 @@ class TestHourFilter:
         return {
             "signals": {
                 "divergence": {"min_gap_usd": 100.0, "max_gap_usd": 0.0, "fast_pass_usd": 125.0},
-                "imbalance": {"buy_threshold": 1.8, "sell_threshold": 0.55,
-                              "detection_window_seconds": [30, 90], "depth_levels": 10},
             },
             "sizing": {"kelly_fraction": 0.25, "min_trade_usdc": 10, "max_trade_usdc": 200},
             "entry": {"skip_hours_utc": skip_hours},
@@ -625,7 +560,7 @@ class TestHourFilter:
             tm_hour = hour
         monkeypatch.setattr(_combiner.time, "gmtime", lambda: _Tm())
         prices = _prices(95_120, 95_110)
-        ws = _mock_book_ws(imbalance_ratio=2.0, secs=60.0)
+        ws = _mock_book_ws()
         return should_trade(
             prices, ws, _slot(95_000), bankroll=2000.0,
             config=self._cfg(list(global_skip)), asset=asset,
