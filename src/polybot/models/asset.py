@@ -24,7 +24,6 @@ class AssetThresholds:
     min_gap_usd: Optional[float] = None
     max_gap_usd: Optional[float] = None
     fast_pass_usd: Optional[float] = None
-    double_min_above_usd: Optional[float] = None
     delta_buckets: Optional[tuple[float, ...]] = None  # USD-denominated calibration bucket edges
     # Tiered entry-price floor: when mean exchange delta >= deep_gap_usd, use
     # deep_gap_min_entry as the floor instead of the normal min_entry_price.

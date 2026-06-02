@@ -70,7 +70,6 @@ assets:
       min_gap_usd: 1.5                # 46h analysis: 88.9% accuracy at 5-agree/$1.5
       max_gap_usd: 0.0                # disabled
       fast_pass_usd: 10.0             # unused while fast_pass_enabled=false
-      double_min_above_usd: 10.0      # was 200 for BTC
       deep_gap_usd: 2.5               # mean delta ≥ $2.5 → use deep_gap_min_entry floor
       deep_gap_min_entry: 0.50        # allow entry down to 0.50 on high-conviction moves
       # 2026-06-01: lowered 0.80→0.55 for normal-path (mean_abs_delta<2.5).
@@ -172,7 +171,6 @@ strategy:
                                     # see scripts/backfill_slot_history.py + analysis 2026-04-28
                                     # for derivation. Set to 0 to disable.
     max_entry_price: 0.95           # reject trades above this — payoff (1-p)/p too small to recoup losses
-    double_min_above_usd: 200.0     # either exchange delta >= this → double the minimum bet
 
   bankroll:
     source: wallet_balance          # live USDC balance; alternative: "fixed"
