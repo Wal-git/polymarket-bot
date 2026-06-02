@@ -18,7 +18,7 @@ class AssetThresholds:
 
     Values that are None fall back to the strategy_defaults block in config.
     Anything price-level-sensitive (USD-denominated gaps, calibration buckets)
-    must be set per-asset; ratio-based thresholds (imbalance, kelly_fraction)
+    must be set per-asset; ratio-based thresholds (kelly_fraction)
     typically don't need overrides.
     """
     min_gap_usd: Optional[float] = None

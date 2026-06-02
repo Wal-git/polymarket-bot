@@ -112,11 +112,6 @@ strategy:
                                       # is older than this. 9.8k-slot analysis showed
                                       # 30-60s lag drops accuracy from 93→78% (BTC) /
                                       # 88→80% (ETH). Set to 0 to disable.
-    imbalance:
-      buy_threshold: 1.8            # retained for data capture only — not used as a trade gate
-      sell_threshold: 0.55
-      detection_window_seconds: [30, 90]
-      depth_levels: 10
     chainlink:
       enabled: true                 # log chainlink price/lag in evaluations (no gating yet)
       rpc_url: "https://polygon.drpc.org"

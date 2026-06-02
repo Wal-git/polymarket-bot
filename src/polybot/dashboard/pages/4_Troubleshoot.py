@@ -84,12 +84,11 @@ with tab_config:
             st.metric("Entry Window (s)", f"{window[0]}–{window[1]}")
 
         with col2:
-            st.markdown("**Imbalance Signal**")
-            imb = signals.get("imbalance", {})
-            st.metric("Buy Threshold", imb.get("buy_threshold", "—"))
-            st.metric("Sell Threshold", imb.get("sell_threshold", "—"))
-            det_window = imb.get("detection_window_seconds", [30, 90])
-            st.metric("Detection Window (s)", f"{det_window[0]}–{det_window[1]}")
+            st.markdown("**Confidence Calibration**")
+            cal = signals.get("calibration", {})
+            st.metric("Enabled", str(cal.get("enabled", False)))
+            st.metric("Cap", cal.get("cap", "—"))
+            st.metric("Min trials/bucket", cal.get("min_n", "—"))
 
         with col3:
             st.markdown("**Exit & Sizing**")
@@ -182,13 +181,12 @@ with tab_controls:
 # ── Tab 4: Signal Debug ───────────────────────────────────────────────────────
 with tab_signals:
     st.markdown('<div class="page-header">SIGNAL THRESHOLD SIMULATOR</div>', unsafe_allow_html=True)
-    st.caption("Test what the divergence and imbalance checks produce at different prices.")
+    st.caption("Test what the divergence check produces at different prices.")
 
     cfg = load_config()
     sig_cfg = cfg.get("strategy", {}).get("signals", {})
 
-    col1, col2 = st.columns(2)
-    with col1:
+    if True:
         st.markdown("**Divergence Check**")
         div_cfg = sig_cfg.get("divergence", {})
         min_gap = float(div_cfg.get("min_gap_usd", 50.0))
@@ -216,38 +214,17 @@ with tab_signals:
         )
         st.markdown(f'Result: <span style="color:{div_color};font-weight:700;">{div_result}</span>', unsafe_allow_html=True)
 
-    with col2:
-        st.markdown("**Imbalance Check**")
-        buy_thresh = float(sig_cfg.get("imbalance", {}).get("buy_threshold", 1.8))
-        sell_thresh = float(sig_cfg.get("imbalance", {}).get("sell_threshold", 0.55))
-        sim_ratio = st.number_input("Imbalance Ratio (bid/ask)", value=1.0, step=0.05, min_value=0.0, max_value=10.0)
-        imb_up = sim_ratio >= buy_thresh
-        imb_dn = sim_ratio <= sell_thresh
-        imb_result = "UP (buy dominant)" if imb_up else ("DOWN (sell dominant)" if imb_dn else "NO SIGNAL")
-        imb_color = "#0ECB81" if imb_up or imb_dn else "#F6465D"
-        st.markdown(f"Buy threshold: ≥{buy_thresh} · Sell threshold: ≤{sell_thresh}")
-        st.markdown(f'Result: <span style="color:{imb_color};font-weight:700;">{imb_result}</span>', unsafe_allow_html=True)
-
     st.markdown("---")
-    confluence_ok = (div_up and imb_up) or (div_dn and imb_dn)
-    if confluence_ok:
-        st.success("CONFLUENCE — both signals agree. Trade would fire.")
-    elif (div_up or div_dn) and not (imb_up or imb_dn):
-        st.warning("Divergence signal present but no imbalance confluence. Trade skipped.")
-    elif not (div_up or div_dn) and (imb_up or imb_dn):
-        st.warning("Imbalance signal present but no price divergence. Trade skipped.")
-    elif div_up and imb_dn or div_dn and imb_up:
-        st.error("Direction mismatch — signals disagree. Trade skipped.")
+    if div_up or div_dn:
+        st.success("Divergence signal present. Trade would fire (subject to entry-price/confidence gates).")
     else:
-        st.error("No signals. Trade skipped.")
+        st.error("No divergence signal. Trade skipped.")
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("**Recent Evaluation Stats**")
     evals = load_evaluations(last_n=200)
     if evals:
         with_div = [e for e in evals if e.get("div_direction")]
-        avg_ratio_vals = [e.get("imbalance_ratio") for e in evals if e.get("imbalance_ratio") is not None]
-        avg_r = sum(avg_ratio_vals) / len(avg_ratio_vals) if avg_ratio_vals else 0
 
         # Per-exchange average |delta| over the same window — only counts
         # evaluations where that exchange returned a value, so an outage
@@ -267,8 +244,4 @@ with tab_signals:
             with col:
                 st.metric(f"Avg |{label} Δ|", f"${v:.2f}" if v is not None else "—")
 
-        sc1, sc2 = st.columns(2)
-        with sc1:
-            st.metric("Divergence hit rate", f"{100*len(with_div)/len(evals):.1f}%")
-        with sc2:
-            st.metric("Avg imbalance ratio", f"{avg_r:.3f}")
+        st.metric("Divergence hit rate", f"{100*len(with_div)/len(evals):.1f}%")

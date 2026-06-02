@@ -41,10 +41,9 @@ else:
     total = len(evals)
     confluences = [e for e in evals if e.get("confluence")]
     no_div = sum(1 for e in evals if e.get("reject_reason") == "no_divergence")
-    no_imb = sum(1 for e in evals if e.get("reject_reason") == "no_imbalance")
     mismatch = sum(1 for e in evals if e.get("reject_reason") == "direction_mismatch")
 
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
         st.markdown(f"""<div class="kpi-block"><div class="kpi-label">Total Slots</div>
         <div class="kpi-value">{total}</div></div>""", unsafe_allow_html=True)
@@ -55,9 +54,6 @@ else:
         st.markdown(f"""<div class="kpi-block"><div class="kpi-label">No Divergence</div>
         <div class="kpi-value negative">{no_div}</div></div>""", unsafe_allow_html=True)
     with c4:
-        st.markdown(f"""<div class="kpi-block"><div class="kpi-label">No Imbalance</div>
-        <div class="kpi-value negative">{no_imb}</div></div>""", unsafe_allow_html=True)
-    with c5:
         st.markdown(f"""<div class="kpi-block"><div class="kpi-label">Dir Mismatch</div>
         <div class="kpi-value amber">{mismatch}</div></div>""", unsafe_allow_html=True)
 
@@ -67,7 +63,6 @@ else:
     reason_counts = {
         "Trade": len(confluences),
         "No Divergence": no_div,
-        "No Imbalance": no_imb,
         "Dir Mismatch": mismatch,
     }
     chart_df = pd.DataFrame({"Outcome": list(reason_counts.keys()), "Count": list(reason_counts.values())})
@@ -93,19 +88,9 @@ else:
             "Bitstamp Δ": f"{float(e['bitstamp_delta']):+.0f}" if e.get("bitstamp_delta") is not None else "—",
             "OKX Δ": f"{float(e['okx_delta']):+.0f}" if e.get("okx_delta") is not None else "—",
             "Divergence": e.get("div_direction") or "—",
-            "Imbalance": f"{e.get('imbalance_ratio'):.3f}" if e.get("imbalance_ratio") is not None else "—",
-            "Imb Dir": e.get("imb_direction") or "—",
             "Result": result,
             "Confidence": f"{e.get('confidence'):.1%}" if e.get("confidence") else "—",
             "Size $": f"${e.get('size_usdc'):.2f}" if e.get("size_usdc") else "—",
         })
 
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
-    # ── Imbalance ratio distribution ──────────────────────────────────────────
-    ratios = [e.get("imbalance_ratio") for e in evals if e.get("imbalance_ratio") is not None]
-    if ratios:
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown('<div class="page-header">IMBALANCE RATIO DISTRIBUTION</div>', unsafe_allow_html=True)
-        ratio_df = pd.DataFrame({"ratio": ratios})
-        st.bar_chart(ratio_df["ratio"].value_counts(bins=20).sort_index())

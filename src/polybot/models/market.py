@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
@@ -71,26 +71,6 @@ class MacroSnapshot:
     es_price: Optional[float]           # E-mini S&P 500 futures spot
     es_pct_change_1h: Optional[float]   # 1-hour % change in ES, signed decimal (0.005 = +0.5%)
     ts: float                           # unix seconds — when fetched
-
-
-@dataclass(frozen=True)
-class OrderLevel:
-    price: float
-    size: float
-
-
-@dataclass
-class OrderBookSnapshot:
-    asset_id: str
-    bids: list[OrderLevel] = field(default_factory=list)  # sorted desc by price
-    asks: list[OrderLevel] = field(default_factory=list)  # sorted asc by price
-
-
-@dataclass(frozen=True)
-class ImbalanceReading:
-    ratio: float
-    seconds_since_open: float
-    ts: float
 
 
 @dataclass(frozen=True)

@@ -124,7 +124,6 @@ if evals:
     label_map = {
         "confluence": ("TRADE FIRED", "#0ECB81"),
         "no_divergence": ("NO DIVERGENCE", "#F6465D"),
-        "no_imbalance": ("NO IMBALANCE", "#F6465D"),
         "direction_mismatch": ("DIRECTION MISMATCH", "#F0B90B"),
     }
     for i, (reason, count) in enumerate(sorted(reasons.items())):
@@ -156,17 +155,13 @@ else:
     slug = last_eval.get("slug", "")
     ptb = last_eval.get("price_to_beat", 0)
     div_dir = last_eval.get("div_direction")
-    imb_dir = last_eval.get("imb_direction")
-    imb_ratio = last_eval.get("imbalance_ratio")
     confidence = last_eval.get("confidence")
     size_usdc = last_eval.get("size_usdc")
     direction = last_eval.get("direction")
 
     div_icon = "✓" if div_dir else "✗"
     div_color = "#0ECB81" if div_dir else "#F6465D"
-    imb_icon = "✓" if imb_dir else "✗"
-    imb_color = "#0ECB81" if imb_dir else "#F6465D"
-    conf_html = f'<span style="color:#0ECB81;font-weight:700;">{confidence:.1%}</span> confidence · <span style="color:#F0B90B;">${size_usdc:.2f}</span> USDC · <span style="color:#0ECB81;">{direction}</span>' if is_confluence else ""
+    conf_html =f'<span style="color:#0ECB81;font-weight:700;">{confidence:.1%}</span> confidence · <span style="color:#F0B90B;">${size_usdc:.2f}</span> USDC · <span style="color:#0ECB81;">{direction}</span>' if is_confluence else ""
 
     st.markdown(f"""
     <div style="padding:1rem 1.25rem;background:rgba(255,255,255,0.02);border-left:3px solid {border};border-radius:4px;">
@@ -184,7 +179,6 @@ else:
         </div>
         <div style="display:flex;gap:1rem;font-family:'Inter',sans-serif;font-size:0.82rem;">
             <span style="color:{div_color};">{div_icon} Divergence: {div_dir or 'none'}</span>
-            <span style="color:{imb_color};">{imb_icon} Imbalance: {f'{imb_ratio:.3f}' if imb_ratio is not None else 'n/a'} ({imb_dir or 'none'})</span>
             {'<span style="color:#0ECB81;">→ ' + conf_html + '</span>' if is_confluence else ''}
         </div>
     </div>
