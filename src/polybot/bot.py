@@ -62,7 +62,6 @@ def _build_asset_specs(config: dict) -> list[AssetSpec]:
                     min_gap_usd=thresholds_block.get("min_gap_usd"),
                     max_gap_usd=thresholds_block.get("max_gap_usd"),
                     fast_pass_usd=thresholds_block.get("fast_pass_usd"),
-                    double_min_above_usd=thresholds_block.get("double_min_above_usd"),
                     delta_buckets=tuple(thresholds_block["delta_buckets"])
                     if thresholds_block.get("delta_buckets") else None,
                     deep_gap_usd=thresholds_block.get("deep_gap_usd"),
