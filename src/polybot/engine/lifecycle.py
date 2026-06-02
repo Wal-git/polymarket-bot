@@ -317,6 +317,8 @@ class MarketLifecycle:
             dry_run=self._dry_run,
             stop_loss=float(exit_cfg.get("stop_loss", 0.35)),
             hold_to_resolution_secs=float(exit_cfg.get("hold_to_resolution_s_remaining", 60.0)),
+            signal_ts=signal_ts,
+            stop_window_s=float(exit_cfg.get("stop_window_s", 60.0)),
             order_id=order_id,
         )
 

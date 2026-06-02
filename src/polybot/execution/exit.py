@@ -68,6 +68,8 @@ async def monitor_position(
     dry_run: bool,
     stop_loss: float = 0.35,
     hold_to_resolution_secs: float = 60.0,
+    signal_ts: Optional[float] = None,
+    stop_window_s: float = 60.0,
     order_id: Optional[str] = None,
 ) -> ExitResult:
     """Poll every 2 seconds. Exit only on stop-loss or hold-to-resolution.
@@ -76,7 +78,16 @@ async def monitor_position(
     profit_target below that triggered instantly on every fill. Positions now
     ride to resolution (full $1.00 payout if correct) unless the bid collapses
     past stop_loss.
+
+    Stop-loss is time-gated: it only fires within `stop_window_s` seconds of
+    entry (`signal_ts`). A backtest over the first ~3 weeks of stops showed fast
+    crashes (bid hits stop within 60s) are genuine losers worth cutting, while
+    slow bleeds to the stop later in the slot mostly revert before resolution —
+    so once the window passes we hold to resolution instead of locking the loss.
+    Set `stop_window_s` <= 0 to disable the gate (stop always active).
     """
+    if signal_ts is None:
+        signal_ts = time.time()
     if not dry_run:
         pos = tracker._positions.get(token_id)
         expected = pos.shares if pos is not None else Decimal("0")
@@ -109,14 +120,29 @@ async def monitor_position(
                 tracker.save()
                 return ExitResult(reason=ExitReason.UNFILLED, pnl=None)
 
+    stop_disabled = False
     while True:
         time_remaining = slot.end_ms / 1000 - time.time()
         current_bid = orderbook_ws.best_bid(direction)
 
-        if current_bid is not None and current_bid <= stop_loss:
-            pnl, exit_price = await _sell(token_id, current_bid, slot, clob, tracker, dry_run)
-            logger.info("exit_stop_loss", slug=slot.slug, bid=current_bid, pnl=pnl)
-            return ExitResult(reason=ExitReason.STOP_LOSS, pnl=pnl, exit_price=exit_price)
+        if not stop_disabled and current_bid is not None and current_bid <= stop_loss:
+            held_s = time.time() - signal_ts
+            if stop_window_s <= 0 or held_s <= stop_window_s:
+                pnl, exit_price = await _sell(token_id, current_bid, slot, clob, tracker, dry_run)
+                logger.info(
+                    "exit_stop_loss", slug=slot.slug, bid=current_bid, pnl=pnl,
+                    held_s=round(held_s, 1),
+                )
+                return ExitResult(reason=ExitReason.STOP_LOSS, pnl=pnl, exit_price=exit_price)
+            # Past the window: latch the stop off and ride to resolution. The bid
+            # is likely to stay <= stop_loss, so checking again every 2s would
+            # only spam logs.
+            stop_disabled = True
+            logger.info(
+                "stop_loss_suppressed_past_window",
+                slug=slot.slug, bid=current_bid,
+                held_s=round(held_s, 1), stop_window_s=stop_window_s,
+            )
 
         if time_remaining < hold_to_resolution_secs:
             logger.info(
