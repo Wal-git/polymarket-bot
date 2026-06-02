@@ -125,10 +125,16 @@ strategy:
       enabled: true                 # log Binance Futures mark/funding in evaluations (no gating yet)
       url: "https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT"
     calibration:
-      enabled: false                # off until we have ~200+ trades — table is too sparse
+      enabled: true                 # 2026-06-02: confidence = empirical resolution win
+                                    # rate for the (asset, entry-price) bucket. Replaces the
+                                    # delta formula, which saturated at 0.95 and was inverted
+                                    # (biggest moves won least). Rebuilt weekly by cron via
+                                    # scripts/build_calibration.py.
       table_path: "data/calibration_table.json"
       min_n: 5                      # min trials per cell before using it (else fallback)
       fallback_confidence: 0.75     # used when no bucket and global both insufficient
+      cap: 0.93                     # ceiling on confidence; realized top-bucket rate is ~0.93,
+                                    # so 0.95 was structurally overconfident and oversized Kelly bets
     macro:
       enabled: true                 # log VIX / DXY / ES futures into evaluations (no gating)
                                     # Review value after ~4 weeks of data — if no signal, delete this feed.
