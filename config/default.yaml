@@ -30,7 +30,9 @@ assets:
       # 2026-06-01: lowered 4→3 after 30d backtest showed marginal 3-of-5
       # fires (56 trades) at 91% WR / +$125, with hour 14 the dominant loser
       # (3 trades / 33% WR / -$79). Net +$205 on 30d when 14 is also skipped.
-      min_agreement: 3
+      # 2026-06-03: REVERTED 3→4. The 6/1 loosening tripled trade count into the
+      # 6/2 -$405 blowup; realized P&L never matched the optimistic backtest.
+      min_agreement: 4
       # Hour 14 added 2026-06-01 alongside the agr=4→3 change (see above).
       # Prior additions: hour 17 (2026-05-28, +$42 BTC-only on 14/21/30d
       # replay); global [7,8,15] (2026-05-16 drawdown analysis). ETH stays
@@ -41,6 +43,8 @@ assets:
       # is the only entry floor. Going to 0.55 was +$192 but per-bucket
       # samples were small and there was a -$96 wart at 0.70 — stopped at
       # 0.65 for safety margin.
+      # 2026-06-03: kept at 0.65 (per user) despite realized BTC 0.70-0.80
+      # showing 50% WR / -$789 (no stops) — revisit if that bucket keeps bleeding.
       min_entry_price: 0.65
 
   ETH:
@@ -71,16 +75,20 @@ assets:
       max_gap_usd: 0.0                # disabled
       fast_pass_usd: 10.0             # unused while fast_pass_enabled=false
       deep_gap_usd: 2.5               # mean delta ≥ $2.5 → use deep_gap_min_entry floor
-      deep_gap_min_entry: 0.50        # allow entry down to 0.50 on high-conviction moves
+      deep_gap_min_entry: 0.40        # 2026-06-03: set to 0.40 (per user) — allows entry
+                                      # down to 0.40 on high-conviction divergence
       # 2026-06-01: lowered 0.80→0.55 for normal-path (mean_abs_delta<2.5).
       # 30d backtest: +57 marginal trades / 90% WR / +$439 vs 0.80 baseline.
       # Deep_gap_min_entry (0.50) unchanged. This effectively unifies the
       # two paths since deep_gap path also lands near 0.50.
+      # 2026-06-03: kept at 0.55 (per user).
       min_entry_price: 0.55
       # 2026-06-01: lowered 5→4. 30d backtest: marginal 4-of-5 trades
       # (would fire at 4 but not 5) = 62 trades, 89% WR, +$259. Net agr=4
       # PnL +$1,983/30d vs agr=5's +$1,724.
-      min_agreement: 4
+      # 2026-06-03: REVERTED 4→5. See BTC min_agreement note — fewer, higher
+      # conviction trades to cut the variance that produced the 6/2 drawdown.
+      min_agreement: 5
       # 2026-06-01: hour 1 UTC added (ETH-specific). 30d data shows h01
       # losing money at every threshold (-$77 at agr=5, -$94 at agr=4,
       # -$119 at agr=3). Skipping h1 nets +$94/30d on top of agr=4.
@@ -147,7 +155,12 @@ strategy:
     # profit_target removed 2026-05-14: with min_entry_price=0.80, any target
     # below 0.80 fires on the first poll and forces a loss-locking sell.
     # Positions now ride to resolution unless bid collapses past stop_loss.
-    stop_loss: 0.35                 # sell when shares drop to 35c
+    # 2026-06-03: DISABLED (0.35→0.0). Realized data: 21 stop exits = -$888
+    # (-$42/ea) vs 238 hold-to-resolution = -$174 (-$0.70/ea). On 5-min binaries
+    # a mid-slot dip to 0.35 is usually transient and reverts by resolution, so
+    # stopping locks losses on names that resolve in our favor. Bid never <= 0,
+    # so 0.0 means the stop never fires (positions ride to resolution).
+    stop_loss: 0.0                  # disabled — hold to resolution
     hold_to_resolution_s_remaining: 60   # if less than 60s left, hold to resolution
     # Time-gate the stop-loss: only honor it within this many seconds of entry.
     # Backtest over 20 stops (2026-05-14..06-02): fast crashes (bid hits stop
@@ -164,8 +177,11 @@ strategy:
     # base_min_usdc = bankroll * min_trade_pct ; base_max_usdc = bankroll * max_trade_pct.
     # Per-asset overrides in `assets.*.thresholds.min_trade_usdc` (absolute dollars)
     # still win and are used as one-off injections.
-    min_trade_pct: 0.30
-    max_trade_pct: 1.00
+    # 2026-06-03: tightened from 0.30/1.00. Old range let a single bet be
+    # 30-100% of bankroll and produced a $412 bet on 6/2. Bets now bounded to
+    # 10-40% of bankroll.
+    min_trade_pct: 0.10
+    max_trade_pct: 0.40
     min_confidence: 0.80            # reject trades below this confidence
     min_entry_price: 0.80           # reject trades when orderbook YES isn't already 0.80+;
                                     # see scripts/backfill_slot_history.py + analysis 2026-04-28
@@ -178,6 +194,7 @@ strategy:
 
 risk:
   max_open_positions: 2
-  daily_loss_limit_pct: 1.0         # kill switch: halt at -100% of startup bankroll/day
+  daily_loss_limit_pct: 0.50        # 2026-06-03: 1.0→0.50. Halt new entries after
+                                    # -50% of startup bankroll in a day.
   max_total_exposure_pct: 0.50
   max_position_pct: 2.0             # max single position = 2× bankroll (currently unused — RiskManager isn't wired in)
