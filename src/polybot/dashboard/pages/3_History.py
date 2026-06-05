@@ -1,33 +1,17 @@
 """Historical slot evaluations — table view with rejection breakdown chart."""
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
-
 import pandas as pd
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
 
-_PDT = timezone(timedelta(hours=-7))
+from polybot.dashboard.theme import PALETTE, page_setup
 
+page_setup("History — POLYBOT", refresh_ms=15_000)
 
-def _to_pdt(iso: str) -> str:
-    try:
-        return datetime.fromisoformat(iso).astimezone(_PDT).strftime("%-I:%M %p PDT")
-    except Exception:
-        return iso[:19].replace("T", " ")
-
-st.set_page_config(page_title="History — POLYBOT", page_icon="◇", layout="wide")
-
-from polybot.dashboard.data_loader import (  # noqa: E402
-    apply_asset_filter,
-    inject_styles,
-    load_evaluations,
-    render_sidebar,
-)
-
-inject_styles()
-st_autorefresh(interval=15_000, key="history_refresh")
-render_sidebar()
+from polybot.dashboard.components import kpi_row  # noqa: E402
+from polybot.dashboard.format import to_pdt  # noqa: E402
+from polybot.dashboard.loaders import load_evaluations  # noqa: E402
+from polybot.dashboard.sidebar import apply_asset_filter  # noqa: E402
 
 st.markdown('<div class="page-header">◇ SLOT HISTORY</div>', unsafe_allow_html=True)
 
@@ -43,19 +27,12 @@ else:
     no_div = sum(1 for e in evals if e.get("reject_reason") == "no_divergence")
     mismatch = sum(1 for e in evals if e.get("reject_reason") == "direction_mismatch")
 
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.markdown(f"""<div class="kpi-block"><div class="kpi-label">Total Slots</div>
-        <div class="kpi-value">{total}</div></div>""", unsafe_allow_html=True)
-    with c2:
-        st.markdown(f"""<div class="kpi-block"><div class="kpi-label">Trades Fired</div>
-        <div class="kpi-value positive">{len(confluences)}</div></div>""", unsafe_allow_html=True)
-    with c3:
-        st.markdown(f"""<div class="kpi-block"><div class="kpi-label">No Divergence</div>
-        <div class="kpi-value negative">{no_div}</div></div>""", unsafe_allow_html=True)
-    with c4:
-        st.markdown(f"""<div class="kpi-block"><div class="kpi-label">Dir Mismatch</div>
-        <div class="kpi-value amber">{mismatch}</div></div>""", unsafe_allow_html=True)
+    kpi_row([
+        {"label": "Total Slots", "value": str(total)},
+        {"label": "Trades Fired", "value": str(len(confluences)), "value_class": "positive"},
+        {"label": "No Divergence", "value": str(no_div), "value_class": "negative"},
+        {"label": "Dir Mismatch", "value": str(mismatch), "value_class": "amber"},
+    ])
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -66,7 +43,7 @@ else:
         "Dir Mismatch": mismatch,
     }
     chart_df = pd.DataFrame({"Outcome": list(reason_counts.keys()), "Count": list(reason_counts.values())})
-    st.bar_chart(chart_df.set_index("Outcome"), color="#F0B90B")
+    st.bar_chart(chart_df.set_index("Outcome"), color=PALETTE.AMBER)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -78,7 +55,7 @@ else:
         reject = e.get("reject_reason") or ""
         result = "TRADE" if e.get("confluence") else reject.replace("_", " ").upper()
         rows.append({
-            "Time": _to_pdt(e.get("ts") or ""),
+            "Time": to_pdt(e.get("ts") or "", "clock"),
             "Asset": e.get("asset") or "BTC",
             "Slot": (e.get("slug") or "")[-10:],
             "P-T-B": f"${float(e.get('price_to_beat') or 0):,.0f}",

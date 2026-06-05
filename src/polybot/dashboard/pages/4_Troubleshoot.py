@@ -1,26 +1,24 @@
 """Troubleshoot — live log tail, config viewer, bot controls."""
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
+import yaml
 
-st.set_page_config(page_title="Troubleshoot — POLYBOT", page_icon="◇", layout="wide")
+from polybot.dashboard.theme import PALETTE, page_setup
 
-from polybot.dashboard.data_loader import (  # noqa: E402
+page_setup("Troubleshoot — POLYBOT", refresh_ms=5_000)
+
+from polybot.dashboard.loaders import (  # noqa: E402
     get_halt_path,
-    inject_styles,
     load_bot_log,
     load_config,
     load_evaluations,
-    render_sidebar,
 )
-
-inject_styles()
-st_autorefresh(interval=5_000, key="troubleshoot_refresh")
-render_sidebar()
 
 st.markdown('<div class="page-header">◇ TROUBLESHOOT</div>', unsafe_allow_html=True)
 
@@ -40,19 +38,16 @@ with tab_log:
         coloured = []
         for line in log_lines:
             if "error" in line.lower() or "ERROR" in line:
-                coloured.append(f'<span style="color:#F6465D;">{line}</span>')
+                coloured.append(f'<span style="color:{PALETTE.RED};">{line}</span>')
             elif "warning" in line.lower() or "WARNING" in line:
-                coloured.append(f'<span style="color:#F0B90B;">{line}</span>')
+                coloured.append(f'<span style="color:{PALETTE.AMBER};">{line}</span>')
             elif "signal_confluence" in line or "signal_fired" in line:
-                coloured.append(f'<span style="color:#0ECB81;font-weight:600;">{line}</span>')
+                coloured.append(f'<span style="color:{PALETTE.GREEN};font-weight:600;">{line}</span>')
             else:
-                coloured.append(f'<span style="color:#B7BDC6;">{line}</span>')
+                coloured.append(f'<span style="color:{PALETTE.MUTED};">{line}</span>')
 
-        log_html = "<br>".join(coloured)
         st.markdown(
-            f'<div style="font-family:monospace;font-size:0.75rem;line-height:1.6;'
-            f'background:#0d0f12;padding:1rem;border-radius:6px;overflow-x:auto;">'
-            f'{log_html}</div>',
+            f'<div class="log-panel">{"<br>".join(coloured)}</div>',
             unsafe_allow_html=True,
         )
 
@@ -64,15 +59,12 @@ with tab_config:
     if not cfg:
         st.warning("Could not load config/default.yaml")
     else:
-        import yaml
-
         # Highlight key thresholds
         strategy = cfg.get("strategy", {})
         signals = strategy.get("signals", {})
         entry = strategy.get("entry", {})
         exit_cfg = strategy.get("exit", {})
         sizing = strategy.get("sizing", {})
-        risk = cfg.get("risk", {})
 
         col1, col2, col3 = st.columns(3)
 
@@ -129,25 +121,19 @@ with tab_controls:
     with col2:
         st.markdown("**PM2 Process Status**")
         try:
-            result = subprocess.run(
-                ["pm2", "jlist"],
-                capture_output=True, text=True, timeout=5
-            )
+            result = subprocess.run(["pm2", "jlist"], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
-                import json
-                processes = json.loads(result.stdout)
-                for proc in processes:
+                for proc in json.loads(result.stdout):
                     name = proc.get("name", "")
                     status = proc.get("pm2_env", {}).get("status", "?")
                     restarts = proc.get("pm2_env", {}).get("restart_time", 0)
-                    uptime = proc.get("pm2_env", {}).get("pm_uptime", 0)
-                    status_color = "#0ECB81" if status == "online" else "#F6465D"
+                    status_color = PALETTE.GREEN if status == "online" else PALETTE.RED
                     st.markdown(
                         f'<div style="padding:0.4rem 0.6rem;margin:0.2rem 0;'
                         f'background:rgba(0,0,0,0.15);border-radius:3px;font-family:monospace;font-size:0.8rem;">'
-                        f'<span style="color:#EAECEF;">{name}</span> &nbsp;'
+                        f'<span style="color:{PALETTE.WHITE};">{name}</span> &nbsp;'
                         f'<span style="color:{status_color};font-weight:700;">{status}</span> &nbsp;'
-                        f'<span style="color:#848E9C;">↺ {restarts}</span>'
+                        f'<span style="color:{PALETTE.GREY};">↺ {restarts}</span>'
                         f'</div>',
                         unsafe_allow_html=True,
                     )
@@ -163,12 +149,11 @@ with tab_controls:
         p = data_dir / fname
         if p.exists():
             size_kb = p.stat().st_size / 1024
-            lines = p.read_text(errors="replace").count("\n") if p.suffix in (".jsonl", ".log") else "—"
+            lines = str(p.read_text(errors="replace").count("\n")) if p.suffix in (".jsonl", ".log") else "—"
             file_info.append({"File": fname, "Size (KB)": f"{size_kb:.1f}", "Lines": lines})
         else:
             file_info.append({"File": fname, "Size (KB)": "—", "Lines": "missing"})
 
-    import pandas as pd
     st.dataframe(pd.DataFrame(file_info), use_container_width=True, hide_index=True)
 
     with st.expander("Clear evaluations log"):
@@ -186,33 +171,33 @@ with tab_signals:
     cfg = load_config()
     sig_cfg = cfg.get("strategy", {}).get("signals", {})
 
-    if True:
-        st.markdown("**Divergence Check**")
-        div_cfg = sig_cfg.get("divergence", {})
-        min_gap = float(div_cfg.get("min_gap_usd", 50.0))
-        min_agreement = int(div_cfg.get("min_agreement", 3))
-        sim_ptb = st.number_input("Price to Beat ($)", value=93000.0, step=100.0)
-        sim_prices = {
-            "Binance":  st.number_input("Binance Price ($)",  value=93000.0, step=10.0, key="sim_binance"),
-            "Coinbase": st.number_input("Coinbase Price ($)", value=93000.0, step=10.0, key="sim_coinbase"),
-            "Kraken":   st.number_input("Kraken Price ($)",   value=93000.0, step=10.0, key="sim_kraken"),
-            "Bitstamp": st.number_input("Bitstamp Price ($)", value=93000.0, step=10.0, key="sim_bitstamp"),
-            "OKX":      st.number_input("OKX Price ($)",      value=93000.0, step=10.0, key="sim_okx"),
-        }
-        sim_deltas = {name: price - sim_ptb for name, price in sim_prices.items()}
-        up_votes = sum(1 for d in sim_deltas.values() if d > min_gap)
-        down_votes = sum(1 for d in sim_deltas.values() if d < -min_gap)
-        div_up = up_votes >= min_agreement and down_votes == 0
-        div_dn = down_votes >= min_agreement and up_votes == 0
-        div_result = "UP" if div_up else ("DOWN" if div_dn else "NO SIGNAL")
-        div_color = "#0ECB81" if div_up or div_dn else "#F6465D"
-        deltas_str = " · ".join(f"{n} **{d:+.0f}**" for n, d in sim_deltas.items())
-        st.markdown(deltas_str)
-        st.markdown(
-            f"Min gap: ±{min_gap} · Agreement: {min_agreement}-of-5 "
-            f"· UP votes: {up_votes} · DOWN votes: {down_votes}"
-        )
-        st.markdown(f'Result: <span style="color:{div_color};font-weight:700;">{div_result}</span>', unsafe_allow_html=True)
+    st.markdown("**Divergence Check**")
+    div_cfg = sig_cfg.get("divergence", {})
+    min_gap = float(div_cfg.get("min_gap_usd", 50.0))
+    min_agreement = int(div_cfg.get("min_agreement", 3))
+    sim_ptb = st.number_input("Price to Beat ($)", value=93000.0, step=100.0)
+    sim_prices = {
+        "Binance":  st.number_input("Binance Price ($)",  value=93000.0, step=10.0, key="sim_binance"),
+        "Coinbase": st.number_input("Coinbase Price ($)", value=93000.0, step=10.0, key="sim_coinbase"),
+        "Kraken":   st.number_input("Kraken Price ($)",   value=93000.0, step=10.0, key="sim_kraken"),
+        "Bitstamp": st.number_input("Bitstamp Price ($)", value=93000.0, step=10.0, key="sim_bitstamp"),
+        "OKX":      st.number_input("OKX Price ($)",      value=93000.0, step=10.0, key="sim_okx"),
+    }
+    sim_deltas = {name: price - sim_ptb for name, price in sim_prices.items()}
+    up_votes = sum(1 for d in sim_deltas.values() if d > min_gap)
+    down_votes = sum(1 for d in sim_deltas.values() if d < -min_gap)
+    div_up = up_votes >= min_agreement and down_votes == 0
+    div_dn = down_votes >= min_agreement and up_votes == 0
+    div_result = "UP" if div_up else ("DOWN" if div_dn else "NO SIGNAL")
+    div_color = PALETTE.GREEN if div_up or div_dn else PALETTE.RED
+    deltas_str = " · ".join(f"{n} **{d:+.0f}**" for n, d in sim_deltas.items())
+    st.markdown(deltas_str)
+    st.markdown(
+        f"Min gap: ±{min_gap} · Agreement: {min_agreement}-of-5 "
+        f"· UP votes: {up_votes} · DOWN votes: {down_votes}"
+    )
+    st.markdown(f'Result: <span style="color:{div_color};font-weight:700;">{div_result}</span>',
+                unsafe_allow_html=True)
 
     st.markdown("---")
     if div_up or div_dn:
