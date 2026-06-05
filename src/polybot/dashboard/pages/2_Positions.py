@@ -1,37 +1,18 @@
 """Trade history with outcomes, timestamps in Pacific time."""
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
-
 import pandas as pd
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
 
-st.set_page_config(page_title="Positions — POLYBOT", page_icon="◇", layout="wide")
+from polybot.dashboard.theme import PALETTE, page_setup
 
-from polybot.dashboard.data_loader import (  # noqa: E402
-    STARTING_BALANCE,
-    inject_styles,
-    load_results,
-    load_state,
-    render_sidebar,
-    strip_slug_prefix,
-)
+page_setup("Positions — POLYBOT", refresh_ms=10_000)
 
-inject_styles()
-st_autorefresh(interval=10_000, key="positions_refresh")
-render_sidebar()
+from polybot.dashboard.components import kpi_row  # noqa: E402
+from polybot.dashboard.format import fmt_pct, pnl_color, pnl_str, strip_slug_prefix, to_pdt  # noqa: E402
+from polybot.dashboard.loaders import STARTING_BALANCE, load_results, load_state  # noqa: E402
 
 st.markdown('<div class="page-header">◇ TRADE HISTORY</div>', unsafe_allow_html=True)
-
-PDT = timezone(timedelta(hours=-7))
-
-def _to_pdt(iso: str) -> str:
-    try:
-        dt = datetime.fromisoformat(iso).astimezone(PDT)
-        return dt.strftime("%-m/%-d %-I:%M %p")
-    except Exception:
-        return iso[:19]
 
 state = load_state()
 trades = state.get("trades", [])
@@ -41,10 +22,6 @@ if not trades:
     st.info("No trades recorded yet.")
 else:
     rows = []
-    total_pnl = 0.0
-    wins = 0
-    losses = 0
-
     for t in reversed(trades):
         if t.get("side") != "BUY":
             continue
@@ -59,13 +36,6 @@ else:
         won = result.get("won") if result else None
         pnl = result.get("pnl") if result else None
 
-        if pnl is not None:
-            total_pnl += pnl
-            if won:
-                wins += 1
-            else:
-                losses += 1
-
         if won is True:
             outcome = "✅ WIN"
         elif won is False:
@@ -73,14 +43,13 @@ else:
         else:
             outcome = "⏳ Pending"
 
-        pnl_str = f"+${pnl:.2f}" if pnl is not None and pnl >= 0 else (f"-${abs(pnl):.2f}" if pnl is not None else "—")
-
+        pnl_display = pnl_str(pnl) if pnl is not None else "—"
         confidence = result.get("confidence") if result else None
         stake = float(t.get("size") or 0) * float(t.get("price") or 0)
-        pnl_pct_str = f"{pnl / stake * 100:+.1f}%" if (pnl is not None and stake > 0) else "—"
+        pnl_pct_str = fmt_pct(pnl / stake * 100) if (pnl is not None and stake > 0) else "—"
 
         rows.append({
-            "Time (PDT)": _to_pdt(t.get("timestamp", "")),
+            "Time (PDT)": to_pdt(t.get("timestamp", ""), "datetime"),
             "Asset": asset,
             "Market": strip_slug_prefix(slug),
             "Direction": t.get("side", ""),
@@ -89,7 +58,7 @@ else:
             "Stake": f"${stake:.2f}",
             "Confidence": f"{confidence:.1%}" if confidence is not None else "—",
             "Outcome": outcome,
-            "P&L": pnl_str,
+            "P&L": pnl_display,
             "P&L %": pnl_pct_str,
         })
 
@@ -98,25 +67,15 @@ else:
     all_wins = sum(1 for r in results.values() if r.get("won"))
     all_losses = sum(1 for r in results.values() if not r.get("won"))
     total_pnl = sum(r.get("pnl", 0) for r in results.values())
+    net_pct = total_pnl / STARTING_BALANCE * 100
 
-    c1, c2, c3, c4 = st.columns(4)
-    pnl_color = "#0ECB81" if total_pnl >= 0 else "#F6465D"
-    pnl_sign = "+" if total_pnl >= 0 else ""
-    with c1:
-        st.markdown(f"""<div class="kpi-block"><div class="kpi-label">Trades</div>
-        <div class="kpi-value">{all_wins + all_losses}</div></div>""", unsafe_allow_html=True)
-    with c2:
-        st.markdown(f"""<div class="kpi-block"><div class="kpi-label">Wins</div>
-        <div class="kpi-value" style="color:#0ECB81">{all_wins}</div></div>""", unsafe_allow_html=True)
-    with c3:
-        st.markdown(f"""<div class="kpi-block"><div class="kpi-label">Losses</div>
-        <div class="kpi-value" style="color:#F6465D">{all_losses}</div></div>""", unsafe_allow_html=True)
-    with c4:
-        net_pct = total_pnl / STARTING_BALANCE * 100
-        st.markdown(f"""<div class="kpi-block"><div class="kpi-label">Net P&L</div>
-        <div class="kpi-value" style="color:{pnl_color}">{pnl_sign}${total_pnl:.2f}</div>
-        <div style="font-size:0.75rem;color:{pnl_color};margin-top:0.15rem;">{net_pct:+.1f}%</div>
-        </div>""", unsafe_allow_html=True)
+    kpi_row([
+        {"label": "Trades", "value": str(all_wins + all_losses)},
+        {"label": "Wins", "value": str(all_wins), "color": PALETTE.GREEN},
+        {"label": "Losses", "value": str(all_losses), "color": PALETTE.RED},
+        {"label": "Net P&L", "value": pnl_str(total_pnl), "color": pnl_color(total_pnl),
+         "sub": fmt_pct(net_pct), "sub_color": pnl_color(total_pnl)},
+    ])
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)

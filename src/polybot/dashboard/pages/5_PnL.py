@@ -3,27 +3,33 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date as date_cls
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 import pandas as pd
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
 
-st.set_page_config(page_title="P&L — POLYBOT", page_icon="◇", layout="wide")
+from polybot.dashboard.theme import PALETTE, page_setup
 
-from polybot.dashboard.data_loader import (  # noqa: E402
-    STARTING_BALANCE,
-    inject_styles,
-    load_balance,
-    load_results_deduped,
-    render_sidebar,
-)
+page_setup("P&L — POLYBOT", refresh_ms=30_000)
 
-inject_styles()
-st_autorefresh(interval=30_000, key="pnl_refresh")
-render_sidebar()
+from polybot.dashboard.components import kpi_row  # noqa: E402
+from polybot.dashboard.format import PDT, fmt_pct, pnl_color, pnl_str  # noqa: E402
+from polybot.dashboard.loaders import STARTING_BALANCE, load_balance, load_results_deduped  # noqa: E402
 
-PDT = timezone(timedelta(hours=-7))
+
+def _x_axis(angle: int = -30, fontsize: int = 11) -> dict:
+    return {"labelColor": PALETTE.GREY, "gridColor": "rgba(255,255,255,0.04)",
+            "domainColor": "rgba(255,255,255,0.1)", "tickColor": "transparent",
+            "labelAngle": angle, "labelFontSize": fontsize}
+
+
+def _y_axis(fmt: str = "$,.2f") -> dict:
+    return {"labelColor": PALETTE.GREY, "gridColor": "rgba(255,255,255,0.06)",
+            "domainColor": "transparent", "tickColor": "transparent",
+            "format": fmt, "labelFontSize": 11}
+
+
+_VEGA_CONFIG = {"background": "transparent", "view": {"stroke": "transparent"}}
 
 st.markdown('<div class="page-header">◇ P&L HISTORY</div>', unsafe_allow_html=True)
 
@@ -54,50 +60,20 @@ worst_day = min(daily.values()) if daily else 0.0
 winning_days = sum(1 for v in daily.values() if v > 0)
 total_trading_days = len(daily)
 
-pnl_color = "#0ECB81" if net_pnl >= 0 else "#F6465D"
-pnl_str = f"+${net_pnl:,.2f}" if net_pnl >= 0 else f"-${abs(net_pnl):,.2f}"
-trade_color = "#0ECB81" if trade_pnl >= 0 else "#F6465D"
-trade_str = f"+${trade_pnl:,.2f}" if trade_pnl >= 0 else f"-${abs(trade_pnl):,.2f}"
-
-c1, c2, c3, c4, c5 = st.columns(5)
 net_pct = net_pnl / STARTING_BALANCE * 100
 trade_pct = trade_pnl / STARTING_BALANCE * 100
 
-with c1:
-    st.markdown(f"""
-    <div class="kpi-block">
-        <div class="kpi-label">Total P&L</div>
-        <div class="kpi-value" style="color:{pnl_color};">{pnl_str}</div>
-        <div style="font-size:0.75rem;color:{pnl_color};margin-top:0.15rem;">{net_pct:+.1f}% vs ${STARTING_BALANCE:.0f} start</div>
-    </div>""", unsafe_allow_html=True)
-with c2:
-    st.markdown(f"""
-    <div class="kpi-block">
-        <div class="kpi-label">Closed Trade P&L</div>
-        <div class="kpi-value" style="color:{trade_color};">{trade_str}</div>
-        <div style="font-size:0.75rem;color:{trade_color};margin-top:0.15rem;">{trade_pct:+.1f}%</div>
-    </div>""", unsafe_allow_html=True)
-with c3:
-    best_str = f"+${best_day:,.2f}" if best_day >= 0 else f"-${abs(best_day):,.2f}"
-    st.markdown(f"""
-    <div class="kpi-block">
-        <div class="kpi-label">Best Day</div>
-        <div class="kpi-value positive">{best_str}</div>
-    </div>""", unsafe_allow_html=True)
-with c4:
-    worst_str = f"-${abs(worst_day):,.2f}" if worst_day < 0 else f"+${worst_day:,.2f}"
-    st.markdown(f"""
-    <div class="kpi-block">
-        <div class="kpi-label">Worst Day</div>
-        <div class="kpi-value negative">{worst_str}</div>
-    </div>""", unsafe_allow_html=True)
-with c5:
-    wr_str = f"{winning_days}/{total_trading_days}" if total_trading_days else "—"
-    st.markdown(f"""
-    <div class="kpi-block">
-        <div class="kpi-label">Winning Days</div>
-        <div class="kpi-value amber">{wr_str}</div>
-    </div>""", unsafe_allow_html=True)
+kpi_row([
+    {"label": "Total P&L", "value": pnl_str(net_pnl), "color": pnl_color(net_pnl),
+     "sub": f"{fmt_pct(net_pct)} vs ${STARTING_BALANCE:.0f} start", "sub_color": pnl_color(net_pnl)},
+    {"label": "Closed Trade P&L", "value": pnl_str(trade_pnl), "color": pnl_color(trade_pnl),
+     "sub": fmt_pct(trade_pct), "sub_color": pnl_color(trade_pnl)},
+    {"label": "Best Day", "value": pnl_str(best_day), "value_class": "positive"},
+    {"label": "Worst Day", "value": pnl_str(worst_day), "value_class": "negative"},
+    {"label": "Winning Days",
+     "value": f"{winning_days}/{total_trading_days}" if total_trading_days else "—",
+     "value_class": "amber"},
+])
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -153,60 +129,34 @@ df["cumulative_pnl"] = df["daily_pnl"].cumsum()
 # ── Daily P&L bar chart ────────────────────────────────────────────────────────
 st.markdown('<div class="page-header">DAILY P&L</div>', unsafe_allow_html=True)
 
-bar_records = df[["date", "daily_pnl"]].to_dict("records")
 vega_bar = {
     "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
     "height": 260,
-    "data": {"values": bar_records},
+    "data": {"values": df[["date", "daily_pnl"]].to_dict("records")},
     "mark": {"type": "bar", "cornerRadiusTopLeft": 2, "cornerRadiusTopRight": 2},
     "encoding": {
-        "x": {
-            "field": "date",
-            "type": "temporal",
-            "axis": {
-                "labelColor": "#848E9C",
-                "gridColor": "rgba(255,255,255,0.04)",
-                "domainColor": "rgba(255,255,255,0.1)",
-                "tickColor": "transparent",
-                "labelAngle": -30,
-                "labelFontSize": 11,
-            },
-            "title": None,
-        },
-        "y": {
-            "field": "daily_pnl",
-            "type": "quantitative",
-            "axis": {
-                "labelColor": "#848E9C",
-                "gridColor": "rgba(255,255,255,0.06)",
-                "domainColor": "transparent",
-                "tickColor": "transparent",
-                "format": "$,.2f",
-                "labelFontSize": 11,
-            },
-            "title": None,
-        },
+        "x": {"field": "date", "type": "temporal", "axis": _x_axis(), "title": None},
+        "y": {"field": "daily_pnl", "type": "quantitative", "axis": _y_axis(), "title": None},
         "color": {
-            "condition": {"test": "datum.daily_pnl >= 0", "value": "#0ECB81"},
-            "value": "#F6465D",
+            "condition": {"test": "datum.daily_pnl >= 0", "value": PALETTE.GREEN},
+            "value": PALETTE.RED,
         },
         "tooltip": [
             {"field": "date", "type": "temporal", "title": "Date", "format": "%Y-%m-%d"},
             {"field": "daily_pnl", "type": "quantitative", "title": "Daily P&L", "format": "$,.2f"},
         ],
     },
-    "config": {"background": "transparent", "view": {"stroke": "transparent"}},
+    "config": _VEGA_CONFIG,
 }
-
 st.vega_lite_chart(vega_bar, use_container_width=True, theme=None)
 
 # ── Cumulative P&L line chart ──────────────────────────────────────────────────
 st.markdown("<br>", unsafe_allow_html=True)
 st.markdown('<div class="page-header">CUMULATIVE TRADE P&L</div>', unsafe_allow_html=True)
 
-line_records = df[["date", "cumulative_pnl"]].to_dict("records")
 last_cum = df["cumulative_pnl"].iloc[-1] if not df.empty else 0.0
-line_color = "#0ECB81" if last_cum >= 0 else "#F6465D"
+line_color = pnl_color(last_cum)
+line_records = df[["date", "cumulative_pnl"]].to_dict("records")
 
 vega_line = {
     "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
@@ -216,14 +166,8 @@ vega_line = {
         {
             "mark": {"type": "area", "opacity": 0.08, "color": line_color},
             "encoding": {
-                "x": {"field": "date", "type": "temporal", "title": None,
-                      "axis": {"labelColor": "#848E9C", "gridColor": "rgba(255,255,255,0.04)",
-                               "domainColor": "rgba(255,255,255,0.1)", "tickColor": "transparent",
-                               "labelAngle": -30, "labelFontSize": 11}},
-                "y": {"field": "cumulative_pnl", "type": "quantitative", "title": None,
-                      "axis": {"labelColor": "#848E9C", "gridColor": "rgba(255,255,255,0.06)",
-                               "domainColor": "transparent", "tickColor": "transparent",
-                               "format": "$,.2f", "labelFontSize": 11}},
+                "x": {"field": "date", "type": "temporal", "title": None, "axis": _x_axis()},
+                "y": {"field": "cumulative_pnl", "type": "quantitative", "title": None, "axis": _y_axis()},
                 "color": {"value": line_color},
             },
         },
@@ -240,9 +184,8 @@ vega_line = {
             },
         },
     ],
-    "config": {"background": "transparent", "view": {"stroke": "transparent"}},
+    "config": _VEGA_CONFIG,
 }
-
 st.vega_lite_chart(vega_line, use_container_width=True, theme=None)
 
 # ── Daily breakdown table ──────────────────────────────────────────────────────
@@ -253,15 +196,12 @@ table_rows = df[df["daily_pnl"] != 0.0].copy().sort_values("date", ascending=Fal
 if table_rows.empty:
     st.info("No trades in the selected date range.")
 else:
-    def _fmt(v: float) -> str:
-        return f"+${v:,.2f}" if v >= 0 else f"-${abs(v):,.2f}"
-
     display_df = pd.DataFrame({
         "Date": table_rows["date"].values,
-        "Daily P&L": [_fmt(v) for v in table_rows["daily_pnl"].values],
-        "Daily %": [f"{v / STARTING_BALANCE * 100:+.1f}%" for v in table_rows["daily_pnl"].values],
-        "Cumulative P&L": [_fmt(v) for v in table_rows["cumulative_pnl"].values],
-        "Cumulative %": [f"{v / STARTING_BALANCE * 100:+.1f}%" for v in table_rows["cumulative_pnl"].values],
+        "Daily P&L": [pnl_str(v) for v in table_rows["daily_pnl"].values],
+        "Daily %": [fmt_pct(v / STARTING_BALANCE * 100) for v in table_rows["daily_pnl"].values],
+        "Cumulative P&L": [pnl_str(v) for v in table_rows["cumulative_pnl"].values],
+        "Cumulative %": [fmt_pct(v / STARTING_BALANCE * 100) for v in table_rows["cumulative_pnl"].values],
     })
     st.dataframe(display_df, use_container_width=True, hide_index=True)
 
@@ -308,36 +248,12 @@ else:
         "data": {"values": hour_records},
         "mark": {"type": "bar", "cornerRadiusTopLeft": 2, "cornerRadiusTopRight": 2},
         "encoding": {
-            "x": {
-                "field": "hour",
-                "type": "ordinal",
-                "axis": {
-                    "labelColor": "#848E9C",
-                    "gridColor": "rgba(255,255,255,0.04)",
-                    "domainColor": "rgba(255,255,255,0.1)",
-                    "tickColor": "transparent",
-                    "labelAngle": -45,
-                    "labelFontSize": 10,
-                },
-                "title": None,
-                "sort": [f"{h:02d}:00" for h in range(24)],
-            },
-            "y": {
-                "field": "pnl",
-                "type": "quantitative",
-                "axis": {
-                    "labelColor": "#848E9C",
-                    "gridColor": "rgba(255,255,255,0.06)",
-                    "domainColor": "transparent",
-                    "tickColor": "transparent",
-                    "format": "$,.2f",
-                    "labelFontSize": 11,
-                },
-                "title": None,
-            },
+            "x": {"field": "hour", "type": "ordinal", "axis": _x_axis(angle=-45, fontsize=10),
+                  "title": None, "sort": [f"{h:02d}:00" for h in range(24)]},
+            "y": {"field": "pnl", "type": "quantitative", "axis": _y_axis(), "title": None},
             "color": {
-                "condition": {"test": "datum.pnl >= 0", "value": "#0ECB81"},
-                "value": "#F6465D",
+                "condition": {"test": "datum.pnl >= 0", "value": PALETTE.GREEN},
+                "value": PALETTE.RED,
             },
             "tooltip": [
                 {"field": "hour", "type": "ordinal", "title": "Hour (PT)"},
@@ -347,7 +263,7 @@ else:
                 {"field": "pnl", "type": "quantitative", "title": "Total P&L", "format": "$,.2f"},
             ],
         },
-        "config": {"background": "transparent", "view": {"stroke": "transparent"}},
+        "config": _VEGA_CONFIG,
     }
     st.vega_lite_chart(vega_hour_pnl, use_container_width=True, theme=None)
 
@@ -359,14 +275,7 @@ else:
             "Hour (PT)": [r["hour"] for r in active_rows],
             "Trades": [r["trades"] for r in active_rows],
             "Win Rate": [f"{r['wins']}/{r['trades']} ({r['win_rate']:.0%})" for r in active_rows],
-            "Total P&L": [
-                f"+${r['pnl']:,.2f}" if r["pnl"] >= 0 else f"-${abs(r['pnl']):,.2f}"
-                for r in active_rows
-            ],
-            "Avg P&L / trade": [
-                f"+${r['pnl']/r['trades']:,.2f}" if r["pnl"] >= 0
-                else f"-${abs(r['pnl'])/r['trades']:,.2f}"
-                for r in active_rows
-            ],
+            "Total P&L": [pnl_str(r["pnl"]) for r in active_rows],
+            "Avg P&L / trade": [pnl_str(r["pnl"] / r["trades"]) for r in active_rows],
         })
         st.dataframe(hour_df, use_container_width=True, hide_index=True)
